@@ -24,8 +24,8 @@ func main() {
 
 		runFlags := flag.NewFlagSet("run", flag.ExitOnError)
 		runFlags.StringVar(&model, "model", "", "Docker image of the model")
-		runFlags.StringVar(&data, "data", "", "Path to the data folder")
-		runFlags.StringVar(&output, "output", "", "Path to the output folder")
+		runFlags.StringVar(&data, "data", "./data", "Path to the data folder")
+		runFlags.StringVar(&output, "output", "./output", "Path to the output folder")
 		runFlags.BoolVar(&force, "force", false, "Force re-creation of existing artifact")
 		if err := runFlags.Parse(os.Args[2:]); err != nil {
 			fatal("error parsing flags: %v", err)
