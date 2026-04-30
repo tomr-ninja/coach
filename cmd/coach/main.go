@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tomr-ninja/coach"
+	"github.com/tomr-ninja/coach/docker"
 )
 
 func main() {
@@ -47,7 +47,11 @@ func main() {
 }
 
 func run(modelImage, dataDir, outputDir string) {
-	client := &coach.MockDockerClient{}
+	client, err := docker.NewRealDockerClient()
+	if err != nil {
+		fatal("create docker client: %v", err)
+	}
+	defer client.Close()
 
 	digest, err := client.ImageDigest(modelImage)
 	if err != nil {
