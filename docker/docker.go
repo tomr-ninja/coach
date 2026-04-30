@@ -1,9 +1,14 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/moby/moby/api/types/container"
@@ -112,4 +117,138 @@ func (c *Client) Run(imageName, dataDir, outputDir string) error {
 
 func (c *Client) Close() error {
 	return c.internal.Close()
+}
+
+func (c *Client) ListScripts(imageName string) ([]string, error) {
+	ctx := context.Background()
+
+	resp, err := c.internal.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:        imageName,
+			Entrypoint:   []string{},
+			Cmd:          []string{"ls", "/scripts"},
+			Tty:          false,
+			AttachStdout: true,
+		},
+		HostConfig: &container.HostConfig{},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create container: %w", err)
+	}
+	defer func() {
+		_, _ = c.internal.ContainerRemove(ctx, resp.ID, client.ContainerRemoveOptions{
+			Force: true,
+		})
+	}()
+
+	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
+		return nil, fmt.Errorf("start container: %w", err)
+	}
+
+	var out bytes.Buffer
+
+	rc, attErr := c.internal.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	})
+
+	if attErr == nil {
+		_ = demuxDockerStream(rc, &out)
+	}
+
+	waitResult := c.internal.ContainerWait(ctx, resp.ID, client.ContainerWaitOptions{
+		Condition: container.WaitConditionNotRunning,
+	})
+	select {
+	case chErr := <-waitResult.Error:
+		if chErr != nil {
+			return nil, fmt.Errorf("wait container: %w", chErr)
+		}
+	case status := <-waitResult.Result:
+		if status.StatusCode != 0 {
+			return nil, fmt.Errorf("container exited with code %d: %s", status.StatusCode, out.String())
+		}
+	}
+
+	var scripts []string
+	for _, line := range bytes.Split(out.Bytes(), []byte("\n")) {
+		name := bytes.TrimSpace(line)
+		if len(name) > 0 {
+			scripts = append(scripts, string(name))
+		}
+	}
+
+	return scripts, nil
+}
+
+func (c *Client) RunScript(imageName string, script string, args []string) error {
+	ctx := context.Background()
+
+	cmd := append([]string{"/scripts/" + script}, args...)
+
+	resp, err := c.internal.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:        imageName,
+			Entrypoint:   cmd[:1],
+			Cmd:          cmd[1:],
+			Tty:          false,
+			AttachStdout: true,
+			AttachStderr: true,
+		},
+		HostConfig: &container.HostConfig{},
+	})
+	if err != nil {
+		return fmt.Errorf("create container: %w", err)
+	}
+	defer func() {
+		_, _ = c.internal.ContainerRemove(ctx, resp.ID, client.ContainerRemoveOptions{
+			Force: true,
+		})
+	}()
+
+	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
+		return fmt.Errorf("start container: %w", err)
+	}
+
+	rc, err := c.internal.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     true,
+	})
+	if err == nil {
+		_ = demuxDockerStream(rc, os.Stdout)
+	}
+
+	waitResult := c.internal.ContainerWait(ctx, resp.ID, client.ContainerWaitOptions{
+		Condition: container.WaitConditionNotRunning,
+	})
+	select {
+	case chErr := <-waitResult.Error:
+		if chErr != nil {
+			return fmt.Errorf("wait container: %w", chErr)
+		}
+	case status := <-waitResult.Result:
+		if status.StatusCode != 0 {
+			return fmt.Errorf("container exited with code %d", status.StatusCode)
+		}
+	}
+
+	return nil
+}
+
+func demuxDockerStream(r io.Reader, w io.Writer) error {
+	header := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(r, header); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil
+			}
+			return err
+		}
+		size := binary.BigEndian.Uint32(header[4:])
+		if _, err := io.CopyN(w, r, int64(size)); err != nil {
+			return err
+		}
+	}
 }
