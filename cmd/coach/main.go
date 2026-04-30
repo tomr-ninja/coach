@@ -19,12 +19,14 @@ func main() {
 			model  string
 			data   string
 			output string
+			force  bool
 		)
 
 		runFlags := flag.NewFlagSet("run", flag.ExitOnError)
 		runFlags.StringVar(&model, "model", "", "Docker image of the model")
 		runFlags.StringVar(&data, "data", "", "Path to the data folder")
 		runFlags.StringVar(&output, "output", "", "Path to the output folder")
+		runFlags.BoolVar(&force, "force", false, "Force re-creation of existing artifact")
 		if err := runFlags.Parse(os.Args[2:]); err != nil {
 			fatal("error parsing flags: %v", err)
 		}
@@ -33,7 +35,7 @@ func main() {
 			fatal("flags -model, -data, and -output are required")
 		}
 
-		fingerprint, err := coach.Run(model, data, output)
+		fingerprint, err := coach.Run(model, data, output, force)
 		if err != nil {
 			fatal("error running coach: %v", err)
 		}

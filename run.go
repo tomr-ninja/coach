@@ -16,7 +16,7 @@ import (
 
 var zeroFingerprint = [32]byte{}
 
-func Run(modelImage, dataDir, outputDir string) ([32]byte, error) {
+func Run(modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
@@ -35,6 +35,15 @@ func Run(modelImage, dataDir, outputDir string) ([32]byte, error) {
 
 	fingerprint := artifactFingerprint(digest, chunkChecksums)
 	artifactsDir := filepath.Join(outputDir, fmt.Sprintf("%x", fingerprint))
+
+	if info, err := os.Stat(artifactsDir); err == nil && info.IsDir() {
+		if !force {
+			return zeroFingerprint, fmt.Errorf("artifact %x already exists", fingerprint)
+		}
+		if err := os.RemoveAll(artifactsDir); err != nil {
+			return zeroFingerprint, fmt.Errorf("remove existing artifact: %w", err)
+		}
+	}
 
 	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
 		return zeroFingerprint, fmt.Errorf("create artifact dir: %w", err)
