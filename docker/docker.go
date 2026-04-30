@@ -26,15 +26,18 @@ func NewRealDockerClient() (*Client, error) {
 func (c *Client) ImageDigest(imageName string) ([32]byte, error) {
 	ctx := context.Background()
 
-	pullResp, err := c.internal.ImagePull(ctx, imageName, client.ImagePullOptions{})
-	if err != nil {
-		return [32]byte{}, fmt.Errorf("pull image %s: %w", imageName, err)
-	}
-	pullResp.Wait(ctx)
-
 	inspect, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
-		return [32]byte{}, fmt.Errorf("inspect image %s: %w", imageName, err)
+		pullResp, pullErr := c.internal.ImagePull(ctx, imageName, client.ImagePullOptions{})
+		if pullErr != nil {
+			return [32]byte{}, fmt.Errorf("pull image %s: %w", imageName, pullErr)
+		}
+		pullResp.Wait(ctx)
+
+		inspect, err = c.internal.ImageInspect(ctx, imageName)
+		if err != nil {
+			return [32]byte{}, fmt.Errorf("inspect image %s: %w", imageName, err)
+		}
 	}
 
 	var digestStr string

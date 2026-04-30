@@ -36,6 +36,10 @@ func Run(modelImage, dataDir, outputDir string) ([32]byte, error) {
 	fingerprint := artifactFingerprint(digest, chunkChecksums)
 	artifactsDir := filepath.Join(outputDir, fmt.Sprintf("%x", fingerprint))
 
+	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+		return zeroFingerprint, fmt.Errorf("create artifact dir: %w", err)
+	}
+
 	if err = client.Run(modelImage, dataDir, artifactsDir); err != nil {
 		return zeroFingerprint, fmt.Errorf("run model: %w", err)
 	}
