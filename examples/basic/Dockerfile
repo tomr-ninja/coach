@@ -1,5 +1,5 @@
 FROM python:3.12-alpine
 
-COPY process.py /process.py
+COPY model.py /model.py
 
-ENTRYPOINT ["python", "/process.py"]
+ENTRYPOINT ["python", "/model.py"]

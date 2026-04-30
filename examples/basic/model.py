@@ -13,12 +13,17 @@ def main():
 
     os.makedirs(output_dir, exist_ok=True)
 
+    words = []
+    for c in chunks:
+        with open(os.path.join(data_dir, c)) as cf:
+            words.extend(cf.read().split())
+    words.sort()
+
     output_path = os.path.join(output_dir, "sorted_chunks.txt")
     with open(output_path, "w") as f:
-        for chunk in chunks:
-            f.write(chunk + "\n")
+        f.write(" ".join(words))
 
-    print(f"Wrote {len(chunks)} sorted chunk names to {output_path}")
+    print(f"Wrote {len(words)} sorted words to {output_path}")
 
 
 if __name__ == "__main__":
