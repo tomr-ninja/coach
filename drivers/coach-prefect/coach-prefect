@@ -1,0 +1,2 @@
+#!/bin/sh
+exec uv run --directory "$(dirname "$0")" python main.py "$@"

@@ -1,0 +1,121 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - gochecknoinits
+    - gocritic
+    - gosec
+    - intrange
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - reassign
+    - revive
+    - unconvert
+    - unparam
+    - canonicalheader
+    - err113
+    - errname
+    - exptostd
+    - fatcontext
+    - goconst
+    - modernize
+    - musttag
+    - nilerr
+    - nilnil
+    - sloglint
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+
+    errorlint:
+      asserts: false
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - ifElseChain
+        - hugeParam
+        - paramTypeCombine
+        - rangeValCopy
+
+    gosec:
+      excludes:
+        - G104
+        - G706
+
+    govet:
+      enable:
+        - nilness
+        - shadow
+
+    nakedret:
+      max-func-lines: 0
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-naming
+        - name: unnecessary-stmt
+
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - err113
+          - gosec
+          - unparam
+
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

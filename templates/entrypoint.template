@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+DATA_DIR="/data"
+OUTPUT_DIR="/output"
+mkdir -p "$DATA_DIR" "$OUTPUT_DIR"
+
+echo "--- Phase 1: Syncing from S3 ($S3_PATH_IN) ---"
+rclone copy "s3-storage:$S3_PATH_IN" "$DATA_DIR" --verbose
+
+echo "--- Phase 2: Running Application ---"
+set +e
+{{.RunCommand}}
+APP_EXIT_CODE=$?
+set -e
+
+echo "--- Phase 3: Syncing to S3 ($S3_PATH_OUT) ---"
+rclone copy "$OUTPUT_DIR" "s3-storage:$S3_PATH_OUT" --verbose
+
+exit $APP_EXIT_CODE

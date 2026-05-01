@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: prefect
+      POSTGRES_PASSWORD: prefect
+      POSTGRES_DB: prefect
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prefect"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  prefect:
+    image: prefecthq/prefect:3-python3.12
+    command: >
+      prefect server start
+        --host 0.0.0.0
+        --port 4200
+    environment:
+      PREFECT_SERVER_API_HOST: "0.0.0.0"
+      PREFECT_SERVER_API_PORT: "4200"
+      PREFECT_API_DATABASE_CONNECTION_URL: "postgresql+asyncpg://prefect:prefect@postgres:5432/prefect"
+      PREFECT_API_URL: "http://localhost:4200/api"
+    ports:
+      - "4200:4200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  registry:
+    image: registry:2
+    ports:
+      - "5000:5000"
+    volumes:
+      - registrydata:/var/lib/registry
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prefect-worker
+    command: >
+      sh -c "
+        prefect work-pool create --type process coach-pool || true;
+        prefect worker start --pool coach-pool
+      "
+    environment:
+      PREFECT_API_URL: "http://prefect:4200/api"
+      PYTHONPATH: /flows
+    depends_on:
+      prefect:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  pgdata:
+  registrydata:
