@@ -51,7 +51,7 @@ S3 credentials come from `coach.json` (see below). The model image runs locally 
 
 ## Scheduling on remote backends
 
-`coach schedule` submits training jobs to remote backends (Prefect, Vertex AI, etc.) via external driver executables.
+`coach schedule` submits training jobs to remote backends (Prefect, Scaleway, Vertex AI, etc.) via external driver executables.
 Coach contains zero backend-specific code — each backend has its own driver that translates a standard JSON job spec
 into the backend's API.
 

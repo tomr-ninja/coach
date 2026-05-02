@@ -3,3 +3,4 @@ coach.json
 __pycache__/
 .venv/
 *.pyc
+drivers/coach-scaleway/coach-scaleway

@@ -5,12 +5,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -82,8 +85,10 @@ func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag str
 }
 
 func (c *Client) ImagePush(ctx context.Context, tag string) error {
+	auth := registryAuth(tag)
 	resp, err := c.internal.ImagePush(ctx, tag, client.ImagePushOptions{
-		All: false,
+		All:          false,
+		RegistryAuth: auth,
 	})
 	if err != nil {
 		return fmt.Errorf("push image %s: %w", tag, err)
@@ -93,6 +98,37 @@ func (c *Client) ImagePush(ctx context.Context, tag string) error {
 		return fmt.Errorf("read push output: %w", err)
 	}
 	return nil
+}
+
+func registryAuth(imageTag string) string {
+	reg := os.Getenv("COACH_REGISTRY_AUTH")
+	if reg != "" {
+		parts := strings.SplitN(reg, ":", 2)
+		username := parts[0]
+		password := ""
+		if len(parts) == 2 {
+			password = parts[1]
+		}
+
+		server := imageTag
+		if idx := strings.Index(imageTag, "/"); idx != -1 {
+			server = imageTag[:idx]
+		}
+
+		auth := struct {
+			Username      string `json:"username"`
+			Password      string `json:"password"`
+			ServerAddress string `json:"serveraddress,omitempty"`
+		}{
+			Username:      username,
+			Password:      password,
+			ServerAddress: server,
+		}
+
+		data, _ := json.Marshal(auth)
+		return base64.URLEncoding.EncodeToString(data)
+	}
+	return ""
 }
 
 func BuildContextDir(dir string) (io.Reader, error) {
