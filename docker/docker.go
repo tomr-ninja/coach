@@ -84,11 +84,10 @@ func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag str
 	return nil
 }
 
-func (c *Client) ImagePush(ctx context.Context, tag string) error {
-	auth := registryAuth(tag)
+func (c *Client) ImagePush(ctx context.Context, tag, auth string) error {
 	resp, err := c.internal.ImagePush(ctx, tag, client.ImagePushOptions{
 		All:          false,
-		RegistryAuth: auth,
+		RegistryAuth: registryAuth(tag, auth),
 	})
 	if err != nil {
 		return fmt.Errorf("push image %s: %w", tag, err)
@@ -100,10 +99,9 @@ func (c *Client) ImagePush(ctx context.Context, tag string) error {
 	return nil
 }
 
-func registryAuth(imageTag string) string {
-	reg := os.Getenv("COACH_REGISTRY_AUTH")
-	if reg != "" {
-		parts := strings.SplitN(reg, ":", 2)
+func registryAuth(imageTag, authStr string) string {
+	if authStr != "" {
+		parts := strings.SplitN(authStr, ":", 2)
 		username := parts[0]
 		password := ""
 		if len(parts) == 2 {

@@ -63,14 +63,12 @@ func main() {
 		}
 	}
 
-	resolveConfig(&cfg)
-
 	if cfg.Token == "" {
-		writeError("secret_key is required. Set it in coach.json backends.scaleway.config or SCW_SECRET_KEY env var")
+		writeError("secret_key is required. Set it in coach.json backends.scaleway.config")
 		os.Exit(0)
 	}
 	if cfg.Project == "" {
-		writeError("project_id is required. Set it in coach.json backends.scaleway.config or SCW_DEFAULT_PROJECT_ID env var")
+		writeError("project_id is required. Set it in coach.json backends.scaleway.config")
 		os.Exit(0)
 	}
 	if cfg.Region == "" {
@@ -156,26 +154,6 @@ func marshalResult(raw map[string]any, result *driverOutput) {
 		if err == nil {
 			result.Status = b
 		}
-	}
-}
-
-func resolveConfig(cfg *struct {
-	Region  string `json:"region"`
-	Project string `json:"project_id"`
-	Token   string `json:"secret_key"`
-	Org     string `json:"organization_id"`
-}) {
-	if cfg.Region == "" {
-		cfg.Region = os.Getenv("SCW_DEFAULT_REGION")
-	}
-	if cfg.Project == "" {
-		cfg.Project = os.Getenv("SCW_DEFAULT_PROJECT_ID")
-	}
-	if cfg.Token == "" {
-		cfg.Token = os.Getenv("SCW_SECRET_KEY")
-	}
-	if cfg.Org == "" {
-		cfg.Org = os.Getenv("SCW_DEFAULT_ORGANIZATION_ID")
 	}
 }
 

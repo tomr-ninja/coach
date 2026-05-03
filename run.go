@@ -149,7 +149,7 @@ func RunS3(cfg *Config, modelImage, s3DataSource, localOutputDir string, force b
 		envVars["RCLONE_CONFIG_S3-STORAGE_ENDPOINT"] = cfg.S3.Endpoint
 	}
 
-	wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, "", entrypoint)
+	wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, "", "", entrypoint)
 	if wrapErr != nil {
 		return zeroFingerprint, fmt.Errorf("wrap image: %w", wrapErr)
 	}

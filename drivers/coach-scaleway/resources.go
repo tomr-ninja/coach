@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+const (
+	defaultCPU = 560
+	defaultMem = 1024
+)
+
 var nonNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 
 func sanitizeName(s string) string {
@@ -28,7 +33,7 @@ func sanitizeName(s string) string {
 
 func parseCPU(s string) uint32 {
 	if s == "" {
-		return 560
+		return defaultCPU
 	}
 
 	if strings.HasSuffix(s, "m") {
@@ -36,7 +41,7 @@ func parseCPU(s string) uint32 {
 		if err == nil {
 			return uint32(v)
 		}
-		return 560
+		return defaultCPU
 	}
 
 	f, err := strconv.ParseFloat(s, 64)
@@ -44,12 +49,12 @@ func parseCPU(s string) uint32 {
 		return uint32(f * 1000)
 	}
 
-	return 560
+	return defaultCPU
 }
 
 func parseMemory(s string) uint32 {
 	if s == "" {
-		return 1024
+		return defaultMem
 	}
 
 	multiplier := map[string]uint32{
@@ -71,7 +76,7 @@ func parseMemory(s string) uint32 {
 		}
 		v, err := strconv.ParseFloat(s[:len(s)-len(suffix)], 64)
 		if err != nil {
-			return 1024
+			return defaultMem
 		}
 
 		if strings.HasPrefix(suffix, "K") {
@@ -94,5 +99,5 @@ func parseMemory(s string) uint32 {
 		return uint32(v)
 	}
 
-	return 1024
+	return defaultMem
 }

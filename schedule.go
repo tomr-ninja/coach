@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/tomr-ninja/coach/docker"
@@ -13,7 +12,7 @@ import (
 
 var (
 	errMixedLocalS3 = errors.New("data source and output must both be local or both be s3")
-	errNoRegistry   = errors.New("COACH_REGISTRY env var is required for remote S3 runs")
+	errNoRegistry   = errors.New("registry is required for remote S3 runs (set in coach.json)")
 )
 
 func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron string, command []string, script string, cpu, memory, gpu, gpuType string, labels map[string]string) (string, error) {
@@ -57,8 +56,7 @@ func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron
 	var model Model
 
 	if wrap {
-		wrapRegistry := os.Getenv("COACH_REGISTRY")
-		if wrapRegistry == "" {
+		if cfg.Registry == "" {
 			return "", fmt.Errorf("%w", errNoRegistry)
 		}
 
@@ -97,7 +95,7 @@ func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron
 			return "", fmt.Errorf("inspect image entrypoint: %w", entryErr)
 		}
 
-		wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, wrapRegistry, entrypoint)
+		wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth, entrypoint)
 		if wrapErr != nil {
 			return "", fmt.Errorf("wrap image: %w", wrapErr)
 		}

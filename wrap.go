@@ -19,7 +19,7 @@ var entrypointTemplate string
 //go:embed templates/Dockerfile.template
 var dockerfileTemplate string
 
-func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, registry string, entrypoint []string) (string, error) {
+func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, registry, registryAuth string, entrypoint []string) (string, error) {
 	safeName := sanitizeImageName(baseImage)
 	shortFP := fingerprint
 	if len(shortFP) > 12 {
@@ -84,7 +84,7 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 	}
 
 	if registry != "" {
-		if err := dc.ImagePush(ctx, tag); err != nil {
+		if err := dc.ImagePush(ctx, tag, registryAuth); err != nil {
 			return "", fmt.Errorf("push image: %w", err)
 		}
 	}

@@ -27,6 +27,8 @@ type Config struct {
 	Backends       map[string]Backend `json:"backends"`
 	DefaultBackend string             `json:"defaultBackend,omitempty"`
 	S3             S3Config           `json:"s3"`
+	Registry       string             `json:"registry,omitempty"`
+	RegistryAuth   string             `json:"registryAuth,omitempty"`
 }
 
 type Backend struct {
