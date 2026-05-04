@@ -29,17 +29,17 @@ func main() {
 	if cfgRaw != "" {
 		if err := json.Unmarshal([]byte(cfgRaw), &cfg); err != nil {
 			writeError("parse COACH_BACKEND_CONFIG: " + err.Error())
-			os.Exit(0)
+			os.Exit(1)
 		}
 	}
 
 	if cfg.Token == "" {
 		writeError("secret_key is required. Set it in coach.json backends.scaleway.config")
-		os.Exit(0)
+		os.Exit(1)
 	}
 	if cfg.Project == "" {
 		writeError("project_id is required. Set it in coach.json backends.scaleway.config")
-		os.Exit(0)
+		os.Exit(1)
 	}
 	if cfg.Region == "" {
 		cfg.Region = "fr-par"
@@ -48,13 +48,13 @@ func main() {
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		writeError("read stdin: " + err.Error())
-		os.Exit(0)
+		os.Exit(1)
 	}
 
 	var spec protocol.JobSpec
 	if uerr := json.Unmarshal(input, &spec); uerr != nil {
 		writeError("parse job spec: " + uerr.Error())
-		os.Exit(0)
+		os.Exit(1)
 	}
 
 	baseURL := "https://api.scaleway.com/serverless-jobs/v1alpha2/regions/" + cfg.Region
