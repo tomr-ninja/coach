@@ -12,9 +12,10 @@ echo "--- Phase 2: Running Application ---"
 set +e
 {{.RunCommand}}
 APP_EXIT_CODE=$?
-set -e
 
 echo "--- Phase 3: Syncing to S3 ($S3_PATH_OUT) ---"
-rclone copy "$OUTPUT_DIR" "s3-storage:$S3_PATH_OUT" --verbose
+if ! rclone copy "$OUTPUT_DIR" "s3-storage:$S3_PATH_OUT" --verbose; then
+  echo "WARNING: S3 upload failed (exit code $?), but preserving application exit code $APP_EXIT_CODE" >&2
+fi
 
 exit $APP_EXIT_CODE

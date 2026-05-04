@@ -5,39 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/tomr-ninja/coach/protocol"
 )
-
-type JobSpec struct {
-	Operation      string `json:"operation"`
-	ScheduledRunID string `json:"scheduledRunId,omitempty"`
-	Job            *Job   `json:"job,omitempty"`
-}
-
-type Job struct {
-	Fingerprint string    `json:"fingerprint"`
-	Name        string    `json:"name,omitempty"`
-	FlowName    string    `json:"flowName"`
-	Schedule    *Schedule `json:"schedule,omitempty"`
-	Model       Model     `json:"model"`
-	Resources   Resources `json:"resources"`
-}
-
-type Schedule struct {
-	Cron     string `json:"cron"`
-	Timezone string `json:"timezone,omitempty"`
-}
-
-type Model struct {
-	Image   string            `json:"image"`
-	Command []string          `json:"command,omitempty"`
-	Script  string            `json:"script,omitempty"`
-	EnvVars map[string]string `json:"envVars,omitempty"`
-}
-
-type Resources struct {
-	CPU    string `json:"cpu,omitempty"`
-	Memory string `json:"memory,omitempty"`
-}
 
 type driverOutput struct {
 	Success        bool              `json:"success"`
@@ -81,7 +51,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	var spec JobSpec
+	var spec protocol.JobSpec
 	if uerr := json.Unmarshal(input, &spec); uerr != nil {
 		writeError("parse job spec: " + uerr.Error())
 		os.Exit(0)

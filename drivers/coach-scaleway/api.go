@@ -10,6 +10,8 @@ import (
 	"maps"
 	"net/http"
 	"time"
+
+	"github.com/tomr-ninja/coach/protocol"
 )
 
 type apiError struct {
@@ -207,7 +209,7 @@ type jobRun struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func buildJobDefinition(job *Job, projectID string) jobDefinitionRequest {
+func buildJobDefinition(job *protocol.Job, projectID string) jobDefinitionRequest {
 	model := job.Model
 
 	startupCmd := model.Command

@@ -40,7 +40,7 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 	if len(entrypoint) > 0 {
 		quoted := make([]string, len(entrypoint))
 		for i, e := range entrypoint {
-			quoted[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(e, "'", "'\\''"))
+			quoted[i] = shellQuote(e)
 		}
 		runCommand = fmt.Sprintf("%s \"$@\"", strings.Join(quoted, " "))
 	} else {
@@ -99,4 +99,32 @@ func sanitizeImageName(name string) string {
 	last := parts[len(parts)-1]
 	last = strings.ReplaceAll(last, ":", "-")
 	return safeImageRegexp.ReplaceAllString(last, "-")
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	for _, r := range s {
+		if !shellSafe(r) {
+			return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+		}
+	}
+	return s
+}
+
+func shellSafe(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return true
+	case r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	}
+	switch r {
+	case '-', '_', '.', '/', ',':
+		return true
+	}
+	return false
 }

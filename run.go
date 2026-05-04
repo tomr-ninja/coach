@@ -54,31 +54,14 @@ func RunLocal(modelImage, dataDir, outputDir string, force bool) ([32]byte, erro
 	fingerprint := artifactFingerprint(digest, chunkChecksums)
 	artifactsDir := filepath.Join(outputDir, fmt.Sprintf("%x", fingerprint))
 
-	if info, statErr := os.Stat(artifactsDir); statErr == nil && info.IsDir() {
-		if !force {
-			return zeroFingerprint, fmt.Errorf("%w: %x", errArtifactExists, fingerprint)
-		}
-		if removeErr := os.RemoveAll(artifactsDir); removeErr != nil {
-			return zeroFingerprint, fmt.Errorf("remove existing artifact: %w", removeErr)
-		}
+	if err = prepareArtifactDir(artifactsDir, force); err != nil {
+		return zeroFingerprint, err
 	}
-
-	if mkdirErr := os.MkdirAll(artifactsDir, 0o755); mkdirErr != nil {
-		return zeroFingerprint, fmt.Errorf("create artifact dir: %w", mkdirErr)
-	}
-
 	if err = client.Run(modelImage, dataDir, artifactsDir); err != nil {
 		return zeroFingerprint, fmt.Errorf("run model: %w", err)
 	}
-	if _, statErr := os.Stat(artifactsDir); statErr != nil {
-		return zeroFingerprint, errArtifactMissing
-	}
-	entries, err := os.ReadDir(artifactsDir)
-	if err != nil {
-		return zeroFingerprint, fmt.Errorf("read artifact dir: %w", err)
-	}
-	if len(entries) == 0 {
-		return zeroFingerprint, errArtifactEmpty
+	if err = validateArtifactDir(artifactsDir); err != nil {
+		return zeroFingerprint, err
 	}
 
 	return fingerprint, nil
@@ -105,17 +88,8 @@ func RunS3(cfg *Config, modelImage, s3DataSource, localOutputDir string, force b
 	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 	artifactsDir := filepath.Join(localOutputDir, fingerprintHex)
 
-	if info, statErr := os.Stat(artifactsDir); statErr == nil && info.IsDir() {
-		if !force {
-			return zeroFingerprint, fmt.Errorf("%w: %x", errArtifactExists, fingerprint)
-		}
-		if removeErr := os.RemoveAll(artifactsDir); removeErr != nil {
-			return zeroFingerprint, fmt.Errorf("remove existing artifact: %w", removeErr)
-		}
-	}
-
-	if mkdirErr := os.MkdirAll(artifactsDir, 0o755); mkdirErr != nil {
-		return zeroFingerprint, fmt.Errorf("create artifact dir: %w", mkdirErr)
+	if err := prepareArtifactDir(artifactsDir, force); err != nil {
+		return zeroFingerprint, err
 	}
 
 	entrypoint, _, entryErr := client.ImageEntrypoint(modelImage)
@@ -126,28 +100,9 @@ func RunS3(cfg *Config, modelImage, s3DataSource, localOutputDir string, force b
 	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
 	s3PathOutAbs := filepath.Join(artifactsDir, "output")
 
-	envVars := map[string]string{
-		"S3_PATH_IN":  s3PathIn,
-		"S3_PATH_OUT": s3PathOutAbs,
-	}
-	envVars["RCLONE_CONFIG_S3-STORAGE_TYPE"] = "s3"
-	if cfg.S3.Provider != "" {
-		envVars["RCLONE_CONFIG_S3-STORAGE_PROVIDER"] = cfg.S3.Provider
-	} else {
-		envVars["RCLONE_CONFIG_S3-STORAGE_PROVIDER"] = "AWS"
-	}
-	if cfg.S3.AccessKeyID != "" {
-		envVars["RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID"] = cfg.S3.AccessKeyID
-	}
-	if cfg.S3.SecretAccessKey != "" {
-		envVars["RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY"] = cfg.S3.SecretAccessKey
-	}
-	if cfg.S3.Region != "" {
-		envVars["RCLONE_CONFIG_S3-STORAGE_REGION"] = cfg.S3.Region
-	}
-	if cfg.S3.Endpoint != "" {
-		envVars["RCLONE_CONFIG_S3-STORAGE_ENDPOINT"] = cfg.S3.Endpoint
-	}
+	envVars := buildS3EnvVars(cfg.S3)
+	envVars["S3_PATH_IN"] = s3PathIn
+	envVars["S3_PATH_OUT"] = s3PathOutAbs
 
 	wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, "", "", entrypoint)
 	if wrapErr != nil {
@@ -158,18 +113,40 @@ func RunS3(cfg *Config, modelImage, s3DataSource, localOutputDir string, force b
 		return zeroFingerprint, fmt.Errorf("run wrapped model: %w", runErr)
 	}
 
-	if _, statErr := os.Stat(artifactsDir); statErr != nil {
-		return zeroFingerprint, errArtifactMissing
-	}
-	entries, err := os.ReadDir(artifactsDir)
-	if err != nil {
-		return zeroFingerprint, fmt.Errorf("read artifact dir: %w", err)
-	}
-	if len(entries) == 0 {
-		return zeroFingerprint, errArtifactEmpty
+	if err := validateArtifactDir(artifactsDir); err != nil {
+		return zeroFingerprint, err
 	}
 
 	return fingerprint, nil
+}
+
+func prepareArtifactDir(path string, force bool) error {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if !force {
+			return fmt.Errorf("%w: %s", errArtifactExists, path)
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove existing artifact: %w", err)
+		}
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("create artifact dir: %w", err)
+	}
+	return nil
+}
+
+func validateArtifactDir(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return errArtifactMissing
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("read artifact dir: %w", err)
+	}
+	if len(entries) == 0 {
+		return errArtifactEmpty
+	}
+	return nil
 }
 
 func CollectDataChecksums(dataDir string) ([][32]byte, error) {
@@ -256,18 +233,6 @@ func CollectDataChecksums(dataDir string) ([][32]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	slices.SortFunc(checksums, func(a, b [32]byte) int {
-		for i := range a {
-			if a[i] < b[i] {
-				return -1
-			}
-			if a[i] > b[i] {
-				return 1
-			}
-		}
-		return 0
-	})
 
 	return checksums, nil
 }

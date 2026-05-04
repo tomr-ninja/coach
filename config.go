@@ -36,6 +36,21 @@ type Backend struct {
 	Config json.RawMessage `json:"config,omitempty"`
 }
 
+func buildS3EnvVars(s3 S3Config) map[string]string {
+	provider := s3.Provider
+	if provider == "" {
+		provider = "AWS"
+	}
+	return map[string]string{
+		"RCLONE_CONFIG_S3-STORAGE_TYPE":              "s3",
+		"RCLONE_CONFIG_S3-STORAGE_PROVIDER":          provider,
+		"RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID":     s3.AccessKeyID,
+		"RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY": s3.SecretAccessKey,
+		"RCLONE_CONFIG_S3-STORAGE_REGION":            s3.Region,
+		"RCLONE_CONFIG_S3-STORAGE_ENDPOINT":          s3.Endpoint,
+	}
+}
+
 func LoadConfig() (*Config, error) {
 	paths := []string{"coach.json"}
 	if home, err := os.UserHomeDir(); err == nil {

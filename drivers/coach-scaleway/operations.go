@@ -5,9 +5,11 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/tomr-ninja/coach/protocol"
 )
 
-func run(api *ScalewayAPI, spec *JobSpec) (map[string]any, error) {
+func run(api *ScalewayAPI, spec *protocol.JobSpec) (map[string]any, error) {
 	jd := buildJobDefinition(spec.Job, api.Project)
 	sid, err := api.createJobDefinition(jd)
 	if err != nil {
@@ -25,7 +27,7 @@ func run(api *ScalewayAPI, spec *JobSpec) (map[string]any, error) {
 	}, nil
 }
 
-func schedule(api *ScalewayAPI, spec *JobSpec) (map[string]any, error) {
+func schedule(api *ScalewayAPI, spec *protocol.JobSpec) (map[string]any, error) {
 	jd := buildJobDefinition(spec.Job, api.Project)
 	sid, err := api.createJobDefinition(jd)
 	if err != nil {

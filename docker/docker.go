@@ -159,15 +159,20 @@ func BuildContextDir(dir string) (io.Reader, error) {
 		if openErr != nil {
 			return openErr
 		}
-		defer f.Close()
 		_, copyErr := io.Copy(tw, f)
-		return copyErr
+		closeErr := f.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+
+		return closeErr
 	}); walkErr != nil {
 		return nil, fmt.Errorf("build context: %w", walkErr)
 	}
 	if err := tw.Close(); err != nil {
 		return nil, fmt.Errorf("close tar: %w", err)
 	}
+
 	return &buf, nil
 }
 
