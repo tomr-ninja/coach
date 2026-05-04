@@ -378,12 +378,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "docker" },
+    { name = "orjson" },
     { name = "prefect" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "docker", specifier = ">=7.0" },
+    { name = "orjson", specifier = ">=3.10" },
     { name = "prefect", specifier = ">=3.0" },
 ]
 

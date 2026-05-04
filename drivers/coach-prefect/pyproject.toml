@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 dependencies = [
     "prefect>=3.0",
     "docker>=7.0",
+    "orjson>=3.10",
 ]
 
 [build-system]
