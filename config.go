@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 )
 
@@ -63,17 +64,16 @@ func LoadConfig() (*Config, error) {
 			continue
 		}
 		var cfg Config
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err = json.Unmarshal(data, &cfg); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", p, err)
 		}
 		for name, backend := range cfg.Backends {
 			expanded := expandEnvInConfig(backend.Config)
 			cfg.Backends[name] = Backend{Driver: backend.Driver, Config: expanded}
 		}
-		if s3Raw, err := json.Marshal(cfg.S3); err == nil {
-			expanded := expandEnvInConfig(s3Raw)
-			_ = json.Unmarshal(expanded, &cfg.S3)
-		}
+
+		expandEnvInStruct(&cfg)
+
 		return &cfg, nil
 	}
 
@@ -95,6 +95,60 @@ func (c *Config) Backend(name string) (*Backend, error) {
 }
 
 var envVarPattern = regexp.MustCompile(`"\$[A-Za-z_][A-Za-z0-9_]*"`)
+
+func expandEnvString(s string) string {
+	if s == "" || s[0] != '$' {
+		return s
+	}
+
+	name := s[1:]
+	val, ok := os.LookupEnv(name)
+	if !ok {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: environment variable %q is not set, using empty string\n", name)
+		return ""
+	}
+
+	return val
+}
+
+func expandEnvInStruct(v any) {
+	val := reflect.ValueOf(v)
+	if val.Kind() != reflect.Ptr || val.IsNil() {
+		return
+	}
+	val = val.Elem()
+	if val.Kind() != reflect.Struct {
+		return
+	}
+
+	expandEnvInValue(val)
+}
+
+func expandEnvInValue(val reflect.Value) {
+	switch val.Kind() {
+	case reflect.Struct:
+		for _, field := range val.Fields() {
+			if field.CanSet() {
+				expandEnvInValue(field)
+			}
+		}
+	case reflect.Map:
+		if val.IsNil() {
+			return
+		}
+		iter := val.MapRange()
+		for iter.Next() {
+			elem := iter.Value()
+			if elem.Kind() == reflect.Struct && elem.CanAddr() {
+				expandEnvInValue(elem.Addr())
+			}
+		}
+	case reflect.String:
+		val.SetString(expandEnvString(val.String()))
+	default:
+		panic("expandEnvInValue: unsupported type")
+	}
+}
 
 func expandEnvInConfig(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {

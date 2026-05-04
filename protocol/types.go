@@ -41,10 +41,10 @@ type Output struct {
 }
 
 type Resources struct {
-	CPU     string `json:"cpu,omitempty"`
-	Memory  string `json:"memory,omitempty"`
-	GPU     string `json:"gpu,omitempty"`
-	GPUType string `json:"gpuType,omitempty"`
+	CPUMillicores uint32 `json:"cpuMillicores,omitempty"`
+	MemoryMi      uint32 `json:"memoryMi,omitempty"`
+	GPU           uint32 `json:"gpu,omitempty"`
+	GPUType       string `json:"gpuType,omitempty"`
 }
 
 type DriverResult struct {

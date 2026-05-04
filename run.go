@@ -23,96 +23,37 @@ var (
 	errArtifactMissing = errors.New("artifact directory was not created")
 )
 
-func Run(modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
+func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
 	if strings.HasPrefix(dataDir, "s3://") {
 		cfg, err := LoadConfig()
 		if err != nil {
 			return zeroFingerprint, fmt.Errorf("load config: %w", err)
 		}
-		return RunS3(cfg, modelImage, dataDir, outputDir, force)
+		return RunS3(ctx, cfg, modelImage, dataDir, outputDir, force)
 	}
-	return RunLocal(modelImage, dataDir, outputDir, force)
+	return RunLocal(ctx, modelImage, dataDir, outputDir, force)
 }
 
-func RunLocal(modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
+func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
 	}
 	defer client.Close()
-
-	digest, err := client.ImageDigest(modelImage)
-	if err != nil {
-		return zeroFingerprint, fmt.Errorf("image digest: %w", err)
-	}
 
 	chunkChecksums, err := CollectDataChecksums(dataDir)
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("data checksums: %w", err)
 	}
 
-	fingerprint := artifactFingerprint(digest, chunkChecksums)
-	artifactsDir := filepath.Join(outputDir, fmt.Sprintf("%x", fingerprint))
-
-	if err = prepareArtifactDir(artifactsDir, force); err != nil {
+	fingerprint, artifactsDir, err := resolveArtifactDir(ctx, client, modelImage, chunkChecksums, outputDir, force)
+	if err != nil {
 		return zeroFingerprint, err
 	}
-	if err = client.Run(modelImage, dataDir, artifactsDir); err != nil {
+
+	if err := client.Run(ctx, modelImage, dataDir, artifactsDir); err != nil {
 		return zeroFingerprint, fmt.Errorf("run model: %w", err)
 	}
-	if err = validateArtifactDir(artifactsDir); err != nil {
-		return zeroFingerprint, err
-	}
-
-	return fingerprint, nil
-}
-
-func RunS3(cfg *Config, modelImage, s3DataSource, localOutputDir string, force bool) ([32]byte, error) {
-	client, err := docker.NewRealDockerClient()
-	if err != nil {
-		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
-	}
-	defer client.Close()
-
-	digest, err := client.ImageDigest(modelImage)
-	if err != nil {
-		return zeroFingerprint, fmt.Errorf("image digest: %w", err)
-	}
-
-	checksums, err := ResolveChecksums(s3DataSource, cfg)
-	if err != nil {
-		return zeroFingerprint, fmt.Errorf("resolve checksums: %w", err)
-	}
-
-	fingerprint := artifactFingerprint(digest, checksums)
-	fingerprintHex := fmt.Sprintf("%x", fingerprint)
-	artifactsDir := filepath.Join(localOutputDir, fingerprintHex)
-
-	if err := prepareArtifactDir(artifactsDir, force); err != nil {
-		return zeroFingerprint, err
-	}
-
-	entrypoint, _, entryErr := client.ImageEntrypoint(modelImage)
-	if entryErr != nil {
-		return zeroFingerprint, fmt.Errorf("inspect image entrypoint: %w", entryErr)
-	}
-
-	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
-	s3PathOutAbs := filepath.Join(artifactsDir, "output")
-
-	envVars := buildS3EnvVars(cfg.S3)
-	envVars["S3_PATH_IN"] = s3PathIn
-	envVars["S3_PATH_OUT"] = s3PathOutAbs
-
-	wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, "", "", entrypoint)
-	if wrapErr != nil {
-		return zeroFingerprint, fmt.Errorf("wrap image: %w", wrapErr)
-	}
-
-	if runErr := client.RunWrapped(wrappedImage, envVars); runErr != nil {
-		return zeroFingerprint, fmt.Errorf("run wrapped model: %w", runErr)
-	}
-
 	if err := validateArtifactDir(artifactsDir); err != nil {
 		return zeroFingerprint, err
 	}
@@ -120,33 +61,33 @@ func RunS3(cfg *Config, modelImage, s3DataSource, localOutputDir string, force b
 	return fingerprint, nil
 }
 
-func prepareArtifactDir(path string, force bool) error {
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		if !force {
-			return fmt.Errorf("%w: %s", errArtifactExists, path)
-		}
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("remove existing artifact: %w", err)
-		}
-	}
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		return fmt.Errorf("create artifact dir: %w", err)
-	}
-	return nil
-}
-
-func validateArtifactDir(path string) error {
-	if _, err := os.Stat(path); err != nil {
-		return errArtifactMissing
-	}
-	entries, err := os.ReadDir(path)
+func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, localOutputDir string, force bool) ([32]byte, error) {
+	client, err := docker.NewRealDockerClient()
 	if err != nil {
-		return fmt.Errorf("read artifact dir: %w", err)
+		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
 	}
-	if len(entries) == 0 {
-		return errArtifactEmpty
+	defer client.Close()
+
+	checksums, err := ResolveChecksums(s3DataSource, cfg)
+	if err != nil {
+		return zeroFingerprint, fmt.Errorf("resolve checksums: %w", err)
 	}
-	return nil
+
+	fingerprint, artifactsDir, err := resolveArtifactDir(ctx, client, modelImage, checksums, localOutputDir, force)
+	if err != nil {
+		return zeroFingerprint, err
+	}
+
+	envVars := buildS3ContainerEnv(cfg, s3DataSource, artifactsDir)
+	if err := wrapAndRunS3(ctx, client, modelImage, fingerprint, envVars); err != nil {
+		return zeroFingerprint, err
+	}
+
+	if err := validateArtifactDir(artifactsDir); err != nil {
+		return zeroFingerprint, err
+	}
+
+	return fingerprint, nil
 }
 
 func CollectDataChecksums(dataDir string) ([][32]byte, error) {
@@ -235,6 +176,81 @@ func CollectDataChecksums(dataDir string) ([][32]byte, error) {
 	}
 
 	return checksums, nil
+}
+
+func resolveArtifactDir(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte, outputDir string, force bool) (resultFP [32]byte, resultDir string, err error) {
+	digest, err := client.ImageDigest(ctx, modelImage)
+	if err != nil {
+		return zeroFingerprint, "", fmt.Errorf("image digest: %w", err)
+	}
+
+	fingerprint := artifactFingerprint(digest, checksums)
+	artifactsDir := filepath.Join(outputDir, fmt.Sprintf("%x", fingerprint))
+
+	if err := prepareArtifactDir(artifactsDir, force); err != nil {
+		return zeroFingerprint, "", err
+	}
+
+	return fingerprint, artifactsDir, nil
+}
+
+func buildS3ContainerEnv(cfg *Config, s3DataSource, artifactsDir string) map[string]string {
+	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
+	s3PathOutAbs := filepath.Join(artifactsDir, "output")
+
+	envVars := buildS3EnvVars(cfg.S3)
+	envVars["S3_PATH_IN"] = s3PathIn
+	envVars["S3_PATH_OUT"] = s3PathOutAbs
+
+	return envVars
+}
+
+func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage string, fingerprint [32]byte, envVars map[string]string) error {
+	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
+	if err != nil {
+		return fmt.Errorf("inspect image entrypoint: %w", err)
+	}
+
+	fingerprintHex := fmt.Sprintf("%x", fingerprint)
+	wrappedImage, err := WrapImage(ctx, client, modelImage, fingerprintHex, "", "", entrypoint)
+	if err != nil {
+		return fmt.Errorf("wrap image: %w", err)
+	}
+
+	if err = client.RunWrapped(ctx, wrappedImage, envVars); err != nil {
+		return fmt.Errorf("run wrapped model: %w", err)
+	}
+
+	return nil
+}
+
+func prepareArtifactDir(path string, force bool) error {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if !force {
+			return fmt.Errorf("%w: %s", errArtifactExists, path)
+		}
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove existing artifact: %w", err)
+		}
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return fmt.Errorf("create artifact dir: %w", err)
+	}
+	return nil
+}
+
+func validateArtifactDir(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return errArtifactMissing
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("read artifact dir: %w", err)
+	}
+	if len(entries) == 0 {
+		return errArtifactEmpty
+	}
+	return nil
 }
 
 func fileSHA256(path string) ([32]byte, error) {

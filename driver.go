@@ -19,9 +19,26 @@ const (
 )
 
 var (
-	errDriverFailure    = errors.New("driver returned failure")
-	errDriverEmptyError = errors.New("driver returned failure without error message")
+	errDriverFailure        = errors.New("driver returned failure")
+	errDriverEmptyError     = errors.New("driver returned failure without error message")
+	errDriverNotFile        = errors.New("driver is a directory, not an executable")
+	errDriverNotExecutable  = errors.New("driver is not executable")
+	errDriverOutputTooLarge = errors.New("driver output exceeded limit")
 )
+
+func ValidateDriver(driverPath string) error {
+	stat, err := os.Stat(driverPath)
+	if err != nil {
+		return fmt.Errorf("validate driver %s: %w", driverPath, err)
+	}
+	if stat.IsDir() {
+		return fmt.Errorf("validate driver %s: %w", driverPath, errDriverNotFile)
+	}
+	if stat.Mode()&0o111 == 0 {
+		return fmt.Errorf("validate driver %s: %w", driverPath, errDriverNotExecutable)
+	}
+	return nil
+}
 
 func InvokeDriver(driverPath string, spec *protocol.JobSpec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
 	return InvokeDriverWithContext(context.Background(), driverPath, spec, backendConfig)
@@ -46,8 +63,8 @@ func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *proto
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("driver %s timed out after %s", driverPath, defaultDriverTimeout)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("driver %s timed out after %s: %w", driverPath, defaultDriverTimeout, err)
 		}
 		return nil, fmt.Errorf("driver %s failed: %w\nstderr: %s", driverPath, err, stderr.String())
 	}
@@ -73,7 +90,7 @@ type limitedBuffer struct {
 
 func (lb *limitedBuffer) Write(p []byte) (int, error) {
 	if lb.buf.Len()+len(p) > maxDriverOutput {
-		return 0, fmt.Errorf("driver output exceeded %d bytes", maxDriverOutput)
+		return 0, fmt.Errorf("%w: %d bytes", errDriverOutputTooLarge, maxDriverOutput)
 	}
 	return lb.buf.Write(p)
 }

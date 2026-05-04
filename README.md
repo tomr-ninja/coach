@@ -94,7 +94,6 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
   - `s3` block is optional — if omitted, Coach falls back to the default AWS SDK credential chain
 
 All values starting with `$` (like `$S3_ACCESS_KEY_ID`) are expanded from environment variables at load time.
-This works for both `config` blocks and the `s3` block.
 
 ### Schedule commands
 

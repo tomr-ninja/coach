@@ -239,8 +239,8 @@ func buildJobDefinition(job *protocol.Job, projectID string) jobDefinitionReques
 
 	return jobDefinitionRequest{
 		Name:                 sanitizeName(name),
-		CPULimit:             parseCPU(job.Resources.CPU),
-		MemoryLimit:          parseMemory(job.Resources.Memory),
+		CPULimit:             defaultIfZero(job.Resources.CPUMillicores, defaultCPU),
+		MemoryLimit:          defaultIfZero(job.Resources.MemoryMi, defaultMem),
 		ImageURI:             model.Image,
 		ProjectID:            projectID,
 		LocalStorageCapacity: 1024,

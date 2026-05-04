@@ -2,7 +2,6 @@ package coach
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,7 +15,13 @@ var (
 	errNoRegistry   = errors.New("registry is required for remote S3 runs (set in coach.json)")
 )
 
-func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron string, command []string, script string, cpu, memory, gpu, gpuType string, labels map[string]string) (string, error) {
+func ScheduleCreate(
+	backendName, modelImage, dataSource, outputURI, scheduleCron string,
+	command []string,
+	script string,
+	resources protocol.Resources,
+	labels map[string]string,
+) (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return "", fmt.Errorf("load config: %w", err)
@@ -27,13 +32,17 @@ func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron
 		return "", err
 	}
 
+	if err = ValidateDriver(backend.Driver); err != nil {
+		return "", fmt.Errorf("validate driver: %w", err)
+	}
+
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return "", fmt.Errorf("create docker client: %w", err)
 	}
 	defer client.Close()
 
-	digest, err := client.ImageDigest(modelImage)
+	digest, err := client.ImageDigest(context.Background(), modelImage)
 	if err != nil {
 		return "", fmt.Errorf("image digest: %w", err)
 	}
@@ -72,7 +81,7 @@ func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron
 		envVars["S3_PATH_IN"] = s3PathIn
 		envVars["S3_PATH_OUT"] = s3PathOut
 
-		entrypoint, _, entryErr := client.ImageEntrypoint(modelImage)
+		entrypoint, _, entryErr := client.ImageEntrypoint(context.Background(), modelImage)
 		if entryErr != nil {
 			return "", fmt.Errorf("inspect image entrypoint: %w", entryErr)
 		}
@@ -110,13 +119,8 @@ func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron
 			Destination: outputURI,
 			MountPath:   "/output",
 		},
-		Resources: protocol.Resources{
-			CPU:     cpu,
-			Memory:  memory,
-			GPU:     gpu,
-			GPUType: gpuType,
-		},
-		Labels: labels,
+		Resources: resources,
+		Labels:    labels,
 	}
 
 	if scheduleCron != "" {
@@ -137,32 +141,24 @@ func ScheduleCreate(backendName, modelImage, dataSource, outputURI, scheduleCron
 	return result.ScheduledRunID, nil
 }
 
-func ScheduleList(backendName string) error {
+func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return nil, fmt.Errorf("load config: %w", err)
 	}
 
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	spec := &protocol.JobSpec{Operation: "list"}
 	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
 	if err != nil {
-		return fmt.Errorf("invoke driver: %w", err)
+		return nil, fmt.Errorf("invoke driver: %w", err)
 	}
 
-	for _, e := range result.Entries {
-		b, err := json.Marshal(e)
-		if err != nil {
-			return fmt.Errorf("marshal entry: %w", err)
-		}
-		fmt.Println(string(b))
-	}
-
-	return nil
+	return result.Entries, nil
 }
 
 func ScheduleDelete(backendName, runID string) error {
@@ -184,30 +180,22 @@ func ScheduleDelete(backendName, runID string) error {
 	return nil
 }
 
-func ScheduleStatus(backendName, runID string) error {
+func ScheduleStatus(backendName, runID string) (*protocol.RunStatus, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return nil, fmt.Errorf("load config: %w", err)
 	}
 
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	spec := &protocol.JobSpec{Operation: "status", ScheduledRunID: runID}
 	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
 	if err != nil {
-		return fmt.Errorf("invoke driver: %w", err)
+		return nil, fmt.Errorf("invoke driver: %w", err)
 	}
 
-	if result.Status != nil {
-		b, err := json.Marshal(result.Status)
-		if err != nil {
-			return fmt.Errorf("marshal status: %w", err)
-		}
-		fmt.Println(string(b))
-	}
-
-	return nil
+	return result.Status, nil
 }

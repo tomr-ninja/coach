@@ -37,9 +37,7 @@ func NewRealDockerClient() (*Client, error) {
 	return &Client{internal: cli}, nil
 }
 
-func (c *Client) ImageDigest(imageName string) ([32]byte, error) {
-	ctx := context.Background()
-
+func (c *Client) ImageDigest(ctx context.Context, imageName string) ([32]byte, error) {
 	inspect, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
 		pullResp, pullErr := c.internal.ImagePull(ctx, imageName, client.ImagePullOptions{})
@@ -108,10 +106,7 @@ func registryAuth(imageTag, authStr string) string {
 			password = parts[1]
 		}
 
-		server := imageTag
-		if idx := strings.Index(imageTag, "/"); idx != -1 {
-			server = imageTag[:idx]
-		}
+		server, _, _ := strings.Cut(imageTag, "/")
 
 		auth := struct {
 			Username      string `json:"username"`
@@ -123,9 +118,14 @@ func registryAuth(imageTag, authStr string) string {
 			ServerAddress: server,
 		}
 
-		data, _ := json.Marshal(auth)
+		data, err := json.Marshal(auth) // #nosec G117
+		if err != nil {
+			return ""
+		}
+
 		return base64.URLEncoding.EncodeToString(data)
 	}
+
 	return ""
 }
 
@@ -176,9 +176,7 @@ func BuildContextDir(dir string) (io.Reader, error) {
 	return &buf, nil
 }
 
-func (c *Client) Run(imageName, dataDir, outputDir string) error {
-	ctx := context.Background()
-
+func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) error {
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
 		return fmt.Errorf("resolve data dir: %w", err)
@@ -221,6 +219,9 @@ func (c *Client) Run(imageName, dataDir, outputDir string) error {
 		Condition: container.WaitConditionNotRunning,
 	})
 	select {
+	case <-ctx.Done():
+		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
+		return ctx.Err()
 	case err := <-waitResult.Error:
 		if err != nil {
 			return fmt.Errorf("wait container: %w", err)
@@ -234,8 +235,7 @@ func (c *Client) Run(imageName, dataDir, outputDir string) error {
 	return nil
 }
 
-func (c *Client) ImageEntrypoint(imageName string) (entrypoint []string, cmd []string, err error) {
-	ctx := context.Background()
+func (c *Client) ImageEntrypoint(ctx context.Context, imageName string) (entrypoint []string, cmd []string, err error) {
 	inspect, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("inspect image %s: %w", imageName, err)
@@ -243,9 +243,7 @@ func (c *Client) ImageEntrypoint(imageName string) (entrypoint []string, cmd []s
 	return inspect.Config.Entrypoint, inspect.Config.Cmd, nil
 }
 
-func (c *Client) RunWrapped(imageName string, envVars map[string]string) error {
-	ctx := context.Background()
-
+func (c *Client) RunWrapped(ctx context.Context, imageName string, envVars map[string]string) error {
 	env := make([]string, 0, len(envVars))
 	for k, v := range envVars {
 		env = append(env, k+"="+v)
@@ -272,6 +270,9 @@ func (c *Client) RunWrapped(imageName string, envVars map[string]string) error {
 		Condition: container.WaitConditionNotRunning,
 	})
 	select {
+	case <-ctx.Done():
+		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
+		return ctx.Err()
 	case err := <-waitResult.Error:
 		if err != nil {
 			return fmt.Errorf("wait container: %w", err)
@@ -289,9 +290,7 @@ func (c *Client) Close() error {
 	return c.internal.Close()
 }
 
-func (c *Client) ListScripts(imageName string) ([]string, error) {
-	ctx := context.Background()
-
+func (c *Client) ListScripts(ctx context.Context, imageName string) ([]string, error) {
 	resp, err := c.internal.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
 			Image:        imageName,
@@ -354,9 +353,7 @@ func (c *Client) ListScripts(imageName string) ([]string, error) {
 	return scripts, nil
 }
 
-func (c *Client) RunScript(imageName string, script string, args []string) error {
-	ctx := context.Background()
-
+func (c *Client) RunScript(ctx context.Context, imageName string, script string, args []string) error {
 	cmd := append([]string{"/scripts/" + script}, args...)
 
 	resp, err := c.internal.ContainerCreate(ctx, client.ContainerCreateOptions{
@@ -374,7 +371,7 @@ func (c *Client) RunScript(imageName string, script string, args []string) error
 		return fmt.Errorf("create container: %w", err)
 	}
 	defer func() {
-		_, _ = c.internal.ContainerRemove(ctx, resp.ID, client.ContainerRemoveOptions{
+		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{
 			Force: true,
 		})
 	}()
@@ -398,6 +395,8 @@ func (c *Client) RunScript(imageName string, script string, args []string) error
 		Condition: container.WaitConditionNotRunning,
 	})
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	case chErr := <-waitResult.Error:
 		if chErr != nil {
 			return fmt.Errorf("wait container: %w", chErr)

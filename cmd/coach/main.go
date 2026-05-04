@@ -1,13 +1,32 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/tomr-ninja/coach"
+	"github.com/tomr-ninja/coach/protocol"
 )
+
+func signalContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+	return ctx, func() {
+		signal.Stop(sigCh)
+		cancel()
+	}
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -36,7 +55,10 @@ func main() {
 			fatal("flags -model, -data, and -output are required")
 		}
 
-		fingerprint, err := coach.Run(model, data, output, force)
+		ctx, cancel := signalContext()
+		defer cancel()
+
+		fingerprint, err := coach.Run(ctx, model, data, output, force)
 		if err != nil {
 			fatal("error running coach: %v", err)
 		}
@@ -48,7 +70,10 @@ func main() {
 		}
 		modelImage := os.Args[2]
 
-		scripts, err := coach.ListScripts(modelImage)
+		ctx, cancel := signalContext()
+		defer cancel()
+
+		scripts, err := coach.ListScripts(ctx, modelImage)
 		if err != nil {
 			fatal("error listing scripts: %v", err)
 		}
@@ -68,7 +93,10 @@ func main() {
 		scriptName := os.Args[3]
 		args := os.Args[4:]
 
-		if err := coach.RunScript(modelImage, scriptName, args); err != nil {
+		ctx, cancel := signalContext()
+		defer cancel()
+
+		if err := coach.RunScript(ctx, modelImage, scriptName, args); err != nil {
 			fatal("error running script: %v", err)
 		}
 
@@ -116,7 +144,8 @@ func main() {
 			}
 
 			labelMap := parseLabels(labels)
-			id, err := coach.ScheduleCreate(backend, model, dataSource, outputURI, sched, command, script, cpu, memory, gpu, gpuType, labelMap)
+			resources := protocol.ParseResources(cpu, memory, gpu, gpuType)
+			id, err := coach.ScheduleCreate(backend, model, dataSource, outputURI, sched, command, script, resources, labelMap)
 			if err != nil {
 				fatal("error: %v", err)
 			}
@@ -130,8 +159,16 @@ func main() {
 				fatal("error parsing flags: %v", err)
 			}
 
-			if err := coach.ScheduleList(backend); err != nil {
+			entries, err := coach.ScheduleList(backend)
+			if err != nil {
 				fatal("error: %v", err)
+			}
+			for _, e := range entries {
+				b, err := json.Marshal(e)
+				if err != nil {
+					fatal("error marshaling entry: %v", err)
+				}
+				fmt.Println(string(b))
 			}
 
 		case "delete":
@@ -162,8 +199,16 @@ func main() {
 				fatal("error parsing flags: %v", err)
 			}
 
-			if err := coach.ScheduleStatus(backend, id); err != nil {
+			status, err := coach.ScheduleStatus(backend, id)
+			if err != nil {
 				fatal("error: %v", err)
+			}
+			if status != nil {
+				b, err := json.Marshal(status)
+				if err != nil {
+					fatal("error marshaling status: %v", err)
+				}
+				fmt.Println(string(b))
 			}
 
 		default:
