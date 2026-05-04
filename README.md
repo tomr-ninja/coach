@@ -34,9 +34,10 @@ include some files (whitelisting). If both files exist, only .coachinclude will 
 
 ### Artifact
 
-An artifact is a baby of the model and the data. It can be literally anything; the only requirement is that it must
-be created at /output/{fingerprint}/ folder, where the fingerprint is a SHA256 hash of the model digest and the data
-chunks' hashes (sorted in ascending order).
+An artifact is a baby of the model and the data. It can be literally anything; the only requirement is that the model
+must write it to `/output`. Coach automatically maps `/output` to a host directory named after the artifact
+fingerprint — a SHA256 hash of the model digest and the data chunks' hashes (sorted in ascending order).
+So from the model's perspective, you simply write to `/output`; coach handles the `{fingerprint}/` subfolder on the host.
 
 ## Running with S3 data
 
