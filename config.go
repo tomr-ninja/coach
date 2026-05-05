@@ -68,11 +68,16 @@ func LoadConfig() (*Config, error) {
 			return nil, fmt.Errorf("parse %s: %w", p, err)
 		}
 		for name, backend := range cfg.Backends {
-			expanded := expandEnvInConfig(backend.Config)
+			expanded, err := expandEnvInConfig(backend.Config)
+			if err != nil {
+				return nil, fmt.Errorf("expand backend %q config in %s: %w", name, p, err)
+			}
 			cfg.Backends[name] = Backend{Driver: backend.Driver, Config: expanded}
 		}
 
-		expandEnvInStruct(&cfg)
+		if err := expandEnvInStruct(&cfg); err != nil {
+			return nil, fmt.Errorf("expand config in %s: %w", p, err)
+		}
 
 		return &cfg, nil
 	}
@@ -96,73 +101,90 @@ func (c *Config) Backend(name string) (*Backend, error) {
 
 var envVarPattern = regexp.MustCompile(`"\$[A-Za-z_][A-Za-z0-9_]*"`)
 
-func expandEnvString(s string) string {
+func expandEnvString(s string) (string, error) {
 	if s == "" || s[0] != '$' {
-		return s
+		return s, nil
 	}
 
 	name := s[1:]
 	val, ok := os.LookupEnv(name)
 	if !ok {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: environment variable %q is not set, using empty string\n", name)
-		return ""
+		return "", fmt.Errorf("environment variable %q is not set", name)
 	}
 
-	return val
+	return val, nil
 }
 
-func expandEnvInStruct(v any) {
+func expandEnvInStruct(v any) error {
 	val := reflect.ValueOf(v)
 	if val.Kind() != reflect.Ptr || val.IsNil() {
-		return
+		return nil
 	}
 	val = val.Elem()
 	if val.Kind() != reflect.Struct {
-		return
+		return nil
 	}
 
-	expandEnvInValue(val)
+	return expandEnvInValue(val)
 }
 
-func expandEnvInValue(val reflect.Value) {
+func expandEnvInValue(val reflect.Value) error {
 	switch val.Kind() {
 	case reflect.Struct:
 		for _, field := range val.Fields() {
 			if field.CanSet() {
-				expandEnvInValue(field)
+				if err := expandEnvInValue(field); err != nil {
+					return err
+				}
 			}
 		}
 	case reflect.Map:
 		if val.IsNil() {
-			return
+			return nil
 		}
 		iter := val.MapRange()
 		for iter.Next() {
 			elem := iter.Value()
 			if elem.Kind() == reflect.Struct && elem.CanAddr() {
-				expandEnvInValue(elem.Addr())
+				if err := expandEnvInValue(elem.Addr()); err != nil {
+					return err
+				}
 			}
 		}
 	case reflect.String:
-		val.SetString(expandEnvString(val.String()))
+		expanded, err := expandEnvString(val.String())
+		if err != nil {
+			return err
+		}
+		val.SetString(expanded)
 	default:
 		panic("expandEnvInValue: unsupported type")
 	}
+
+	return nil
 }
 
-func expandEnvInConfig(raw json.RawMessage) json.RawMessage {
+func expandEnvInConfig(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 {
-		return raw
+		return raw, nil
 	}
+	var expandErr error
 	result := envVarPattern.ReplaceAllFunc(raw, func(match []byte) []byte {
+		if expandErr != nil {
+			return match
+		}
 		name := string(match[2 : len(match)-1])
 		val, ok := os.LookupEnv(name)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "warning: environment variable %q is not set, using empty string\n", name)
-			return []byte(`""`)
+			expandErr = fmt.Errorf("environment variable %q is not set", name)
+			return match
 		}
 		b, _ := json.Marshal(val)
 		return b
 	})
-	return result
+	if expandErr != nil {
+		return nil, expandErr
+	}
+
+	return result, nil
 }

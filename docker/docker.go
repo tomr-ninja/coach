@@ -37,6 +37,14 @@ func NewRealDockerClient() (*Client, error) {
 	return &Client{internal: cli}, nil
 }
 
+func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {
+	_, err := c.internal.ImageInspect(ctx, imageName)
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (c *Client) ImageDigest(ctx context.Context, imageName string) ([32]byte, error) {
 	inspect, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
@@ -181,9 +189,15 @@ func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) 
 	if err != nil {
 		return fmt.Errorf("resolve data dir: %w", err)
 	}
+	if _, err := os.Stat(absData); err != nil {
+		return fmt.Errorf("data dir %s does not exist: %w", absData, err)
+	}
 	absOutput, err := filepath.Abs(outputDir)
 	if err != nil {
 		return fmt.Errorf("resolve output dir: %w", err)
+	}
+	if _, err := os.Stat(absOutput); err != nil {
+		return fmt.Errorf("output dir %s does not exist: %w", absOutput, err)
 	}
 
 	resp, err := c.internal.ContainerCreate(ctx, client.ContainerCreateOptions{

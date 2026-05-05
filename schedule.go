@@ -11,8 +11,9 @@ import (
 )
 
 var (
-	errMixedLocalS3 = errors.New("data source and output must both be local or both be s3")
-	errNoRegistry   = errors.New("registry is required for remote S3 runs (set in coach.json)")
+	errMixedLocalS3  = errors.New("data source and output must both be local or both be s3")
+	errNoRegistry    = errors.New("registry is required for remote S3 runs (set in coach.json)")
+	errImageNotLocal = errors.New("model image must be available locally; pull it first with docker pull")
 )
 
 func ScheduleCreate(
@@ -41,6 +42,14 @@ func ScheduleCreate(
 		return "", fmt.Errorf("create docker client: %w", err)
 	}
 	defer client.Close()
+
+	exists, err := client.ImageExists(context.Background(), modelImage)
+	if err != nil {
+		return "", fmt.Errorf("check image exists: %w", err)
+	}
+	if !exists {
+		return "", fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
+	}
 
 	digest, err := client.ImageDigest(context.Background(), modelImage)
 	if err != nil {
