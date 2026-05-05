@@ -76,8 +76,8 @@ func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *proto
 		return nil, fmt.Errorf("parse driver output: %w\nstdout: %s", err, stdout.String())
 	}
 
-	if result.ProtocolVersion != 0 && result.ProtocolVersion != protocol.ProtocolVersion {
-		return nil, fmt.Errorf("%w: driver v%d, coach v%d", errDriverVersion, result.ProtocolVersion, protocol.ProtocolVersion)
+	if result.ProtocolVersion != 0 && result.ProtocolVersion != protocol.Version {
+		return nil, fmt.Errorf("%w: driver v%d, coach v%d", errDriverVersion, result.ProtocolVersion, protocol.Version)
 	}
 
 	if !result.Success {

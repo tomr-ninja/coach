@@ -11,9 +11,12 @@ import (
 )
 
 var (
-	errMixedLocalS3  = errors.New("data source and output must both be local or both be s3")
-	errNoRegistry    = errors.New("registry is required for remote S3 runs (set in coach.json)")
-	errImageNotLocal = errors.New("model image must be available locally; pull it first with docker pull")
+	errMixedLocalS3   = errors.New("data source and output must both be local or both be s3")
+	errNoRegistry     = errors.New("registry is required for remote S3 runs (set in coach.json)")
+	errImageNotLocal  = errors.New("model image must be available locally; pull it first with docker pull")
+	errNoSubmitResult = errors.New("driver returned no submit result")
+	errNoListResult   = errors.New("driver returned no list result")
+	errNoStatusResult = errors.New("driver returned no status result")
 )
 
 func ScheduleCreate(
@@ -138,7 +141,7 @@ func ScheduleCreate(
 	}
 
 	spec := &protocol.Spec{
-		ProtocolVersion: protocol.ProtocolVersion,
+		ProtocolVersion: protocol.Version,
 		Type:            "submit",
 		Job:             job,
 	}
@@ -148,7 +151,7 @@ func ScheduleCreate(
 	}
 
 	if result.SubmitResult == nil {
-		return "", fmt.Errorf("driver returned no submit result")
+		return "", errNoSubmitResult
 	}
 
 	return result.SubmitResult.ID, nil
@@ -166,7 +169,7 @@ func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
 	}
 
 	spec := &protocol.Spec{
-		ProtocolVersion: protocol.ProtocolVersion,
+		ProtocolVersion: protocol.Version,
 		Type:            "list",
 	}
 	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
@@ -175,7 +178,7 @@ func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
 	}
 
 	if result.ListResult == nil {
-		return nil, fmt.Errorf("driver returned no list result")
+		return nil, errNoListResult
 	}
 
 	return result.ListResult.Entries, nil
@@ -193,7 +196,7 @@ func ScheduleDelete(backendName, id string) error {
 	}
 
 	spec := &protocol.Spec{
-		ProtocolVersion: protocol.ProtocolVersion,
+		ProtocolVersion: protocol.Version,
 		Type:            "delete",
 		ID:              id,
 	}
@@ -216,7 +219,7 @@ func ScheduleStatus(backendName, id string) (*protocol.StatusResult, error) {
 	}
 
 	spec := &protocol.Spec{
-		ProtocolVersion: protocol.ProtocolVersion,
+		ProtocolVersion: protocol.Version,
 		Type:            "status",
 		ID:              id,
 	}
@@ -226,7 +229,7 @@ func ScheduleStatus(backendName, id string) (*protocol.StatusResult, error) {
 	}
 
 	if result.StatusResult == nil {
-		return nil, fmt.Errorf("driver returned no status result")
+		return nil, errNoStatusResult
 	}
 
 	return result.StatusResult, nil

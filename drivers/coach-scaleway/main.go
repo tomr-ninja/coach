@@ -71,7 +71,7 @@ func main() {
 }
 
 func writeResult(result *protocol.DriverResult) {
-	result.ProtocolVersion = protocol.ProtocolVersion
+	result.ProtocolVersion = protocol.Version
 	out, err := json.Marshal(result)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshal result: %v\n", err)

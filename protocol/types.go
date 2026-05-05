@@ -1,6 +1,6 @@
 package protocol
 
-const ProtocolVersion = 1
+const Version = 1
 
 type Spec struct {
 	ProtocolVersion int    `json:"protocolVersion"`

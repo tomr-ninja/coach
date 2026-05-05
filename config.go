@@ -14,6 +14,7 @@ var (
 	errConfigNotFound  = errors.New("coach.json not found in current directory or ~/.config/coach/")
 	errNoBackend       = errors.New("no backend specified and no defaultBackend configured")
 	errBackendNotFound = errors.New("backend not found in config")
+	errEnvVarNotSet    = errors.New("environment variable not set")
 )
 
 type S3Config struct {
@@ -109,7 +110,7 @@ func expandEnvString(s string) (string, error) {
 	name := s[1:]
 	val, ok := os.LookupEnv(name)
 	if !ok {
-		return "", fmt.Errorf("environment variable %q is not set", name)
+		return "", fmt.Errorf("%w: %q", errEnvVarNotSet, name)
 	}
 
 	return val, nil
@@ -176,10 +177,11 @@ func expandEnvInConfig(raw json.RawMessage) (json.RawMessage, error) {
 		name := string(match[2 : len(match)-1])
 		val, ok := os.LookupEnv(name)
 		if !ok {
-			expandErr = fmt.Errorf("environment variable %q is not set", name)
+			expandErr = fmt.Errorf("%w: %q", errEnvVarNotSet, name)
 			return match
 		}
 		b, _ := json.Marshal(val)
+
 		return b
 	})
 	if expandErr != nil {
