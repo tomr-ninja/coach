@@ -1,14 +1,14 @@
-# coach — train your models, and don't overthink it
+# Coach — train your models; don't overthink it
 
-coach is a CLI tool for model training management.
+Coach is a CLI tool for model training management. It does three main things for you:
 
-coach is based on a primitive idea: your training artifact is a baby of the model and the data.
+1. Artifact versioning — automatically computes a unique fingerprint for every combination of model and data.
+2. Remote scheduling — submit training jobs to any backend (Prefect, Scaleway, Vertex AI, etc.) using drivers.
+3. S3 support — seamlessly use S3 buckets as data sources and output targets as if it was local storage.
 
-Usage:
+Your model may remain completely oblivious about any of that happening; your backend doesn't need any additional setup*.
 
-```shell
-coach run --model <model-image> --data <data-folder> --output <output-folder>
-```
+\* *Some backends, like Prefect, require a bit of setup just to enable running Docker containers.*
 
 ## Definitions
 
@@ -39,16 +39,11 @@ must write it to `/output`. Coach automatically maps `/output` to a host directo
 fingerprint — a SHA256 hash of the model digest and the data chunks' hashes (sorted in ascending order).
 So from the model's perspective, you simply write to `/output`; coach handles the `{fingerprint}/` subfolder on the host.
 
-## Running with S3 data
-
-`coach run` supports S3 data sources. When `--data` starts with `s3://`, Coach automatically builds a wrapper image
-that pulls data from S3 into `/data`, runs the model, and copies `/output` back to a local directory.
+## Local usage
 
 ```shell
-coach run --model my-model:v1 --data s3://my-bucket/training-data/ --output ./output
+coach run --model <model-image> [--data <data-folder>] [--output <output-folder>] [--force]
 ```
-
-S3 credentials come from `coach.json` (see below). The model image runs locally via Docker — no remote backend needed.
 
 ## Scheduling on remote backends
 
@@ -62,6 +57,8 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
 
 ```json
 {
+  "registry": "docker.io/myorg",
+  "registryAuth": "$DOCKER_AUTH",
   "backends": {
     "prefect": {
       "driver": "coach-prefect",
@@ -81,6 +78,8 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
 }
 ```
 
+- `registry` — container registry for pushing wrapped images (e.g. `docker.io/myorg`). If omitted, the image is built but not pushed.
+- `registryAuth` — registry auth string (format: `username:password`). Only needed for remote backends.
 - `backends` — backend definitions. Each backend has:
   - `driver` — path or name of the driver executable (must be on `$PATH` or absolute)
   - `config` — arbitrary JSON passed to the driver via `COACH_BACKEND_CONFIG` env var
@@ -113,6 +112,7 @@ coach schedule create \
 
 Omit `--schedule` for a one-off run. `--data` accepts a single source (local path or `s3://` URI).
 Data source and output must either both be local or both be S3 — mixing is not allowed.
+`--script` runs a named script from `/scripts/` in the container; `--command` passes additional command args.
 
 **List scheduled runs:**
 
@@ -148,7 +148,7 @@ This means drivers never need to understand S3, fetch data, or manage uploads �
    - Installs **rclone** inside the container
    - Adds an **entrypoint.sh** that handles all data movement
    - Entrypoint script preserves the original image's ENTRYPOINT so the model runs exactly as intended
-3. Pushes the wrapper image to your registry (`COACH_REGISTRY` env var)
+3. Pushes the wrapper image to your registry (`registry` field in `coach.json`)
 4. Forwards the wrapper image name + env vars (S3 paths and rclone credentials) to the driver
 5. The driver creates a container from the wrapper image and injects the env vars — that's it
 
@@ -165,23 +165,12 @@ in `coach.json`, which are converted to `RCLONE_CONFIG_S3-STORAGE_*` env vars an
 
 #### Requirements
 
-- `COACH_REGISTRY` environment variable set to your container registry (e.g. `docker.io/myorg`)
+- `registry` field set in `coach.json` with your container registry (e.g. `docker.io/myorg`)
+- `registryAuth` in `coach.json` with base64-encoded credentials (optional, only for private registries)
 - `s3` block in `coach.json` with S3 credentials
 - Docker daemon accessible for building and pushing the wrapper image
-- Your model image must be Debian/Ubuntu-based (wrapper installs rclone via `apt-get`)
 
 #### Example
-
-```shell
-export COACH_REGISTRY=docker.io/myorg
-
-coach schedule create \
-  --backend prefect \
-  --model my-model:v1 \
-  --data s3://my-bucket/training-data/ \
-  --output s3://my-bucket/output/ \
-  --cpu 4 --memory 16Gi
-```
 
 With this `coach.json`:
 
@@ -189,6 +178,7 @@ With this `coach.json`:
 {
   "backends": { "prefect": { "driver": "coach-prefect", "config": {} } },
   "defaultBackend": "prefect",
+  "registry": "docker.io/myorg",
   "s3": {
     "accessKeyId": "$S3_ACCESS_KEY_ID",
     "secretAccessKey": "$S3_SECRET_ACCESS_KEY",
@@ -196,6 +186,15 @@ With this `coach.json`:
     "provider": "AWS"
   }
 }
+```
+
+```shell
+coach schedule create \
+  --backend prefect \
+  --model my-model:v1 \
+  --data s3://my-bucket/training-data/ \
+  --output s3://my-bucket/output/ \
+  --cpu 4 --memory 16Gi
 ```
 
 Coach will build and push `docker.io/myorg/coach-wrapped-my-model-v1:abc123def456` before submitting the job.
@@ -256,7 +255,7 @@ driver — same behavior as before.
 
 ### How it works
 
-1. Coach resolves checksums for the `--data` source (SHA256 for local files, S3 ETag for remote objects)
+1. Coach resolves checksums for the `--data` source (SHA256 for local files, SHA256 of S3 ETag for remote objects)
 2. Computes an artifact fingerprint: `SHA256(model digest || sorted checksums)`
 3. If the data source is an S3 URI: builds and pushes a wrapper image with rclone, derives `S3_PATH_IN`/`S3_PATH_OUT`
    from your URIs, converts `coach.json` `s3` block to `RCLONE_CONFIG_*` env vars
@@ -266,129 +265,11 @@ driver — same behavior as before.
 
 ### Drivers
 
-A driver is an executable that reads a JSON spec from stdin and writes a JSON result to stdout.
-Drivers can be written in any language.
+Drivers are external executables that translate a standard JSON job spec into backend-specific API calls.
+Drivers can be written in any language. Two reference implementations are included:
 
-#### How drivers work
+- `drivers/coach-prefect/` — Python driver for Prefect
+- `drivers/coach-scaleway/` — Go driver for Scaleway Serverless Jobs
 
-The `driver` field in `coach.json` is resolved like a shell command:
-
-- **Name only** (e.g. `"coach-prefect"`) — looked up on `$PATH`. Put your driver in `/usr/local/bin/`, `~/.local/bin/`, or any directory already in your `$PATH`.
-- **Relative path** (e.g. `"./drivers/coach-prefect"`) — resolved relative to the current working directory.
-- **Absolute path** (e.g. `"/home/user/projects/coach-drivers/coach-prefect"`) — used as-is.
-
-A common layout is to keep drivers alongside your project:
-
-```
-my-project/
-├── coach.json          # driver: "./drivers/coach-prefect"
-├── drivers/
-│   └── coach-prefect   # executable script or binary
-├── data/
-└── model.py
-```
-
-Coach executes the driver as a subprocess:
-
-1. Writes the JSON spec to the driver's **stdin**
-2. Sets `COACH_BACKEND_CONFIG` environment variable with the backend's `config` block from `coach.json`
-3. Waits for the driver to exit
-4. Reads the JSON result from the driver's **stdout**
-5. Captures **stderr** and displays it on failure
-
-#### Driver protocol version
-
-All specs include `"protocolVersion": 1` and all results include `"protocolVersion": 1`. Coach validates that the driver's reported version matches. This allows the protocol to evolve with explicit breaking changes.
-
-#### Exit code contract
-
-- **Exit code 0** — the driver ran to completion. Check the `success` field in the JSON result to determine if the operation succeeded or failed.
-- **Exit code non-zero** — the driver crashed or encountered an internal bug. Coach treats this as a hard failure (no result is parsed).
-
-Operational errors (e.g., "job not found", "API rate limit") should return exit code 0 with `"success": false` and an `"error"` message. Only crashes/bugs should use non-zero exit codes.
-
-#### What a driver must implement
-
-A driver must handle these spec types:
-
-| Type | What to do |
-|------|------------|
-| `submit` | Create a container from `model.image`, inject all keys from `model.envVars` as container env vars. If `job.isRecurring` is true, set up recurring execution per `job.schedule`. If false, run once immediately. Return `submitResult` with the run/deployment ID. |
-| `list` | List all existing runs. Return `listResult` with `entries` array. |
-| `delete` | Delete a run by `id`. |
-| `status` | Return the current status of a run by `id`. Return `statusResult`. |
-
-#### Driver contract
-
-All inputs include `"protocolVersion"` and `"type"`. All outputs include `"success"` and `"protocolVersion"`. On failure (`"success": false`), include `"error"`.
-
-##### `submit` — create a new run (one-off or recurring)
-
-**Input (one-off):**
-
-```json
-{"protocolVersion":1,"type":"submit","job":{"fingerprint":"abc123","name":"coach-container-runner-my-model-v1","isRecurring":false,"wrapped":true,"model":{"image":"docker.io/myorg/coach-wrapped-my-model-v1:abc123def456","envVars":{"S3_PATH_IN":"bucket/data","S3_PATH_OUT":"bucket/output/abc123def456","RCLONE_CONFIG_S3-STORAGE_TYPE":"s3","RCLONE_CONFIG_S3-STORAGE_PROVIDER":"AWS","RCLONE_CONFIG_S3-STORAGE_REGION":"us-east-1","RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID":"AKIA...","RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY":"..."}},"data":{"sources":["s3://bucket/data/"],"mountPath":"/data"},"output":{"destination":"s3://bucket/output/","mountPath":"/output"},"resources":{"cpuMillicores":4000,"memoryMi":16384},"labels":{"env":"prod"}}}
-```
-
-**Input (recurring):**
-
-Same as above but with `"isRecurring":true` and `"schedule":{"cron":"0 */6 * * *","timezone":"UTC"}`.
-
-**Key fields:**
-
-- `job.isRecurring` — explicitly indicates whether this is a recurring or one-off run. When `true`, `job.schedule` is present with cron details.
-- `job.wrapped` — when `true`, the container image includes an entrypoint that handles all data I/O (S3 sync). Drivers must pass `model.envVars` to the container but should **not** attempt volume mounts or S3 transfers — the wrapper handles it.
-- `job.data` and `job.output` — describe the original data sources and output destinations. These are informational. When `wrapped` is `true`, data is available at `/data` inside the container and output is written to `/output` by the wrapper entrypoint. When `wrapped` is `false`, drivers should mount data at `data.mountPath` and output at `output.mountPath` where possible.
-- `model.envVars` — general-purpose env var injection. All keys must be passed to the container as-is. For S3 runs this contains rclone credentials and paths; drivers don't need to interpret them.
-
-Optional fields: `job.model.command`, `job.model.script`, `job.resources.gpu`, `job.resources.gpuType`.
-
-**Output:**
-
-```json
-{"success":true,"protocolVersion":1,"submitResult":{"id":"run-abc-123","url":"https://cloud.prefect.io/..."}}
-```
-
-##### `list` — list all runs
-
-**Input:**
-
-```json
-{"protocolVersion":1,"type":"list"}
-```
-
-**Output:**
-
-```json
-{"success":true,"protocolVersion":1,"listResult":{"entries":[{"id":"abc","schedule":"0 */6 * * *","status":"active","url":"https://..."}]}}
-```
-
-`schedule` is omitted for one-off runs.
-
-##### `delete` — delete a run by ID
-
-**Input:**
-
-```json
-{"protocolVersion":1,"type":"delete","id":"run-abc-123"}
-```
-
-**Output:**
-
-```json
-{"success":true,"protocolVersion":1}
-```
-
-##### `status` — get status of a single run
-
-**Input:**
-
-```json
-{"protocolVersion":1,"type":"status","id":"run-abc-123"}
-```
-
-**Output:**
-
-```json
-{"success":true,"protocolVersion":1,"statusResult":{"id":"run-abc-123","state":"running","lastRunAt":"2026-05-01T10:00:00Z","nextRunAt":"2026-05-01T16:00:00Z"}}
-```
+The full driver protocol specification, including the JSON contract, exit code rules, and operation examples, is
+in **[protocol/README.md](protocol/README.md)**.
