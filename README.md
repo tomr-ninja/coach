@@ -266,7 +266,7 @@ driver — same behavior as before.
 
 ### Drivers
 
-A driver is an executable that reads a JSON job spec from stdin and writes a JSON result to stdout.
+A driver is an executable that reads a JSON spec from stdin and writes a JSON result to stdout.
 Drivers can be written in any language.
 
 #### How drivers work
@@ -290,59 +290,77 @@ my-project/
 
 Coach executes the driver as a subprocess:
 
-1. Writes the JSON job spec to the driver's **stdin**
+1. Writes the JSON spec to the driver's **stdin**
 2. Sets `COACH_BACKEND_CONFIG` environment variable with the backend's `config` block from `coach.json`
 3. Waits for the driver to exit
 4. Reads the JSON result from the driver's **stdout**
 5. Captures **stderr** and displays it on failure
 
+#### Driver protocol version
+
+All specs include `"protocolVersion": 1` and all results include `"protocolVersion": 1`. Coach validates that the driver's reported version matches. This allows the protocol to evolve with explicit breaking changes.
+
+#### Exit code contract
+
+- **Exit code 0** — the driver ran to completion. Check the `success` field in the JSON result to determine if the operation succeeded or failed.
+- **Exit code non-zero** — the driver crashed or encountered an internal bug. Coach treats this as a hard failure (no result is parsed).
+
+Operational errors (e.g., "job not found", "API rate limit") should return exit code 0 with `"success": false` and an `"error"` message. Only crashes/bugs should use non-zero exit codes.
+
 #### What a driver must implement
 
-A driver must handle these operations:
+A driver must handle these spec types:
 
-| Operation | What to do |
-|-----------|------------|
-| `schedule` / `run` | Create a container from `model.image`, inject all keys from `model.envVars` as container env vars. Data/output mount paths are informational — the wrapper handles S3 internally. Return `scheduledRunId`. |
-| `list` | List all existing runs. Return `entries` array with `id`, `schedule`, `status`, `url`. |
-| `delete` | Delete a run by `scheduledRunId`. |
-| `status` | Return the current status of a run by `scheduledRunId`. Return `state`, `lastRunAt`, `nextRunAt`. |
-
-Exit code 0 = success, non-zero = failure.
+| Type | What to do |
+|------|------------|
+| `submit` | Create a container from `model.image`, inject all keys from `model.envVars` as container env vars. If `job.isRecurring` is true, set up recurring execution per `job.schedule`. If false, run once immediately. Return `submitResult` with the run/deployment ID. |
+| `list` | List all existing runs. Return `listResult` with `entries` array. |
+| `delete` | Delete a run by `id`. |
+| `status` | Return the current status of a run by `id`. Return `statusResult`. |
 
 #### Driver contract
 
-All inputs include `"operation"`. All outputs include `"success"`. On failure (`"success": false`), include `"error"`.
+All inputs include `"protocolVersion"` and `"type"`. All outputs include `"success"` and `"protocolVersion"`. On failure (`"success": false`), include `"error"`.
 
-##### `schedule` / `run` — create a new run (recurring or one-off)
+##### `submit` — create a new run (one-off or recurring)
 
-**Input:**
+**Input (one-off):**
 
 ```json
-{"operation":"schedule","job":{"fingerprint":"abc123","model":{"image":"docker.io/myorg/coach-wrapped-my-model-v1:abc123def456","envVars":{"S3_PATH_IN":"bucket/data","S3_PATH_OUT":"bucket/output/abc123def456","RCLONE_CONFIG_S3-STORAGE_TYPE":"s3","RCLONE_CONFIG_S3-STORAGE_PROVIDER":"AWS","RCLONE_CONFIG_S3-STORAGE_REGION":"us-east-1","RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID":"AKIA...","RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY":"..."}},"data":{"sources":["s3://bucket/data/"],"mountPath":"/data"},"output":{"destination":"s3://bucket/output/","mountPath":"/output"},"resources":{"cpu":"4","memory":"16Gi"},"schedule":{"cron":"0 */6 * * *","timezone":"UTC"},"labels":{"env":"prod"}}}
+{"protocolVersion":1,"type":"submit","job":{"fingerprint":"abc123","name":"coach-container-runner-my-model-v1","isRecurring":false,"wrapped":true,"model":{"image":"docker.io/myorg/coach-wrapped-my-model-v1:abc123def456","envVars":{"S3_PATH_IN":"bucket/data","S3_PATH_OUT":"bucket/output/abc123def456","RCLONE_CONFIG_S3-STORAGE_TYPE":"s3","RCLONE_CONFIG_S3-STORAGE_PROVIDER":"AWS","RCLONE_CONFIG_S3-STORAGE_REGION":"us-east-1","RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID":"AKIA...","RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY":"..."}},"data":{"sources":["s3://bucket/data/"],"mountPath":"/data"},"output":{"destination":"s3://bucket/output/","mountPath":"/output"},"resources":{"cpuMillicores":4000,"memoryMi":16384},"labels":{"env":"prod"}}}
 ```
 
-`schedule` includes `job.schedule`; `run` does not. Optional fields: `job.name`, `job.model.command`, `job.model.script`, `job.resources.gpu`, `job.resources.gpuType`, `job.model.envVars`.
+**Input (recurring):**
 
-`model.envVars` is the general-purpose env var injection mechanism — all keys must be passed to the container as-is. For S3 runs it contains rclone credentials and S3 paths; drivers don't need to interpret them.
+Same as above but with `"isRecurring":true` and `"schedule":{"cron":"0 */6 * * *","timezone":"UTC"}`.
+
+**Key fields:**
+
+- `job.isRecurring` — explicitly indicates whether this is a recurring or one-off run. When `true`, `job.schedule` is present with cron details.
+- `job.wrapped` — when `true`, the container image includes an entrypoint that handles all data I/O (S3 sync). Drivers must pass `model.envVars` to the container but should **not** attempt volume mounts or S3 transfers — the wrapper handles it.
+- `job.data` and `job.output` — describe the original data sources and output destinations. These are informational. When `wrapped` is `true`, data is available at `/data` inside the container and output is written to `/output` by the wrapper entrypoint. When `wrapped` is `false`, drivers should mount data at `data.mountPath` and output at `output.mountPath` where possible.
+- `model.envVars` — general-purpose env var injection. All keys must be passed to the container as-is. For S3 runs this contains rclone credentials and paths; drivers don't need to interpret them.
+
+Optional fields: `job.model.command`, `job.model.script`, `job.resources.gpu`, `job.resources.gpuType`.
 
 **Output:**
 
 ```json
-{"success":true,"scheduledRunId":"run-abc-123","url":"https://cloud.prefect.io/..."}
+{"success":true,"protocolVersion":1,"submitResult":{"id":"run-abc-123","url":"https://cloud.prefect.io/..."}}
 ```
 
-##### `list` — list all scheduled/one-off runs
+##### `list` — list all runs
 
 **Input:**
 
 ```json
-{"operation":"list"}
+{"protocolVersion":1,"type":"list"}
 ```
 
 **Output:**
 
 ```json
-{"success":true,"entries":[{"id":"abc","schedule":"0 */6 * * *","status":"active","url":"https://..."}]}
+{"success":true,"protocolVersion":1,"listResult":{"entries":[{"id":"abc","schedule":"0 */6 * * *","status":"active","url":"https://..."}]}}
 ```
 
 `schedule` is omitted for one-off runs.
@@ -352,13 +370,13 @@ All inputs include `"operation"`. All outputs include `"success"`. On failure (`
 **Input:**
 
 ```json
-{"operation":"delete","scheduledRunId":"run-abc-123"}
+{"protocolVersion":1,"type":"delete","id":"run-abc-123"}
 ```
 
 **Output:**
 
 ```json
-{"success":true}
+{"success":true,"protocolVersion":1}
 ```
 
 ##### `status` — get status of a single run
@@ -366,13 +384,11 @@ All inputs include `"operation"`. All outputs include `"success"`. On failure (`
 **Input:**
 
 ```json
-{"operation":"status","scheduledRunId":"run-abc-123"}
+{"protocolVersion":1,"type":"status","id":"run-abc-123"}
 ```
 
 **Output:**
 
 ```json
-{"success":true,"status":{"id":"run-abc-123","state":"running","lastRunAt":"2026-05-01T10:00:00Z","nextRunAt":"2026-05-01T16:00:00Z"}}
+{"success":true,"protocolVersion":1,"statusResult":{"id":"run-abc-123","state":"running","lastRunAt":"2026-05-01T10:00:00Z","nextRunAt":"2026-05-01T16:00:00Z"}}
 ```
-
-**Exit code:** 0 = success, non-zero = failure.

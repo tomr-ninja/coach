@@ -24,6 +24,7 @@ var (
 	errDriverNotFile        = errors.New("driver is a directory, not an executable")
 	errDriverNotExecutable  = errors.New("driver is not executable")
 	errDriverOutputTooLarge = errors.New("driver output exceeded limit")
+	errDriverVersion        = errors.New("driver protocol version mismatch")
 )
 
 func ValidateDriver(driverPath string) error {
@@ -40,18 +41,18 @@ func ValidateDriver(driverPath string) error {
 	return nil
 }
 
-func InvokeDriver(driverPath string, spec *protocol.JobSpec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
+func InvokeDriver(driverPath string, spec *protocol.Spec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
 	return InvokeDriverWithContext(context.Background(), driverPath, spec, backendConfig)
 }
 
-func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *protocol.JobSpec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
+func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *protocol.Spec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, defaultDriverTimeout)
 	defer cancel()
 
 	specJSON, err := json.Marshal(spec)
 	if err != nil {
-		return nil, fmt.Errorf("marshal job spec: %w", err)
+		return nil, fmt.Errorf("marshal spec: %w", err)
 	}
 
 	cmd := exec.CommandContext(ctx, driverPath)
@@ -62,16 +63,21 @@ func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *proto
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Exit code non-zero = driver crashed/bugged. Exit code 0 with success:false = operational error.
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("driver %s timed out after %s: %w", driverPath, defaultDriverTimeout, err)
 		}
-		return nil, fmt.Errorf("driver %s failed: %w\nstderr: %s", driverPath, err, stderr.String())
+		return nil, fmt.Errorf("driver %s crashed: %w\nstderr: %s", driverPath, err, stderr.String())
 	}
 
 	var result protocol.DriverResult
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		return nil, fmt.Errorf("parse driver output: %w\nstdout: %s", err, stdout.String())
+	}
+
+	if result.ProtocolVersion != 0 && result.ProtocolVersion != protocol.ProtocolVersion {
+		return nil, fmt.Errorf("%w: driver v%d, coach v%d", errDriverVersion, result.ProtocolVersion, protocol.ProtocolVersion)
 	}
 
 	if !result.Success {

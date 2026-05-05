@@ -1,15 +1,19 @@
 package protocol
 
-type JobSpec struct {
-	Operation      string `json:"operation"`
-	ScheduledRunID string `json:"scheduledRunId,omitempty"`
-	Job            *Job   `json:"job,omitempty"`
+const ProtocolVersion = 1
+
+type Spec struct {
+	ProtocolVersion int    `json:"protocolVersion"`
+	Type            string `json:"type"`
+	ID              string `json:"id,omitempty"`
+	Job             *Job   `json:"job,omitempty"`
 }
 
 type Job struct {
 	Fingerprint string            `json:"fingerprint"`
-	Name        string            `json:"name,omitempty"`
-	FlowName    string            `json:"flowName"`
+	Name        string            `json:"name"`
+	IsWrapped   bool              `json:"isWrapped"`
+	IsRecurring bool              `json:"isRecurring"`
 	Schedule    *Schedule         `json:"schedule,omitempty"`
 	Model       Model             `json:"model"`
 	Data        Data              `json:"data"`
@@ -48,12 +52,28 @@ type Resources struct {
 }
 
 type DriverResult struct {
-	Success        bool            `json:"success"`
-	ScheduledRunID string          `json:"scheduledRunId,omitempty"`
-	URL            string          `json:"url,omitempty"`
-	Entries        []ScheduleEntry `json:"entries,omitempty"`
-	Status         *RunStatus      `json:"status,omitempty"`
-	Error          string          `json:"error,omitempty"`
+	Success         bool          `json:"success"`
+	Error           string        `json:"error,omitempty"`
+	ProtocolVersion int           `json:"protocolVersion"`
+	SubmitResult    *SubmitResult `json:"submitResult,omitempty"`
+	ListResult      *ListResult   `json:"listResult,omitempty"`
+	StatusResult    *StatusResult `json:"statusResult,omitempty"`
+}
+
+type SubmitResult struct {
+	ID  string `json:"id"`
+	URL string `json:"url,omitempty"`
+}
+
+type ListResult struct {
+	Entries []ScheduleEntry `json:"entries"`
+}
+
+type StatusResult struct {
+	ID        string `json:"id"`
+	State     string `json:"state"`
+	LastRunAt string `json:"lastRunAt,omitempty"`
+	NextRunAt string `json:"nextRunAt,omitempty"`
 }
 
 type ScheduleEntry struct {
@@ -61,11 +81,4 @@ type ScheduleEntry struct {
 	Schedule string `json:"schedule,omitempty"`
 	Status   string `json:"status"`
 	URL      string `json:"url,omitempty"`
-}
-
-type RunStatus struct {
-	ID        string `json:"id"`
-	State     string `json:"state"`
-	LastRunAt string `json:"lastRunAt,omitempty"`
-	NextRunAt string `json:"nextRunAt,omitempty"`
 }

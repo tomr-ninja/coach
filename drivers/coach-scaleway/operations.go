@@ -9,45 +9,39 @@ import (
 	"github.com/tomr-ninja/coach/protocol"
 )
 
-func run(api *ScalewayAPI, spec *protocol.JobSpec) (map[string]any, error) {
-	jd := buildJobDefinition(spec.Job, api.Project)
+func submit(api *ScalewayAPI, job *protocol.Job) *protocol.DriverResult {
+	if !job.IsWrapped {
+		return &protocol.DriverResult{Success: false, Error: "scaleway driver requires wrapped images (S3 data); local data paths are not supported"}
+	}
+
+	jd := buildJobDefinition(job, api.Project)
 	sid, err := api.createJobDefinition(jd)
 	if err != nil {
-		return nil, fmt.Errorf("create job definition: %w", err)
+		return &protocol.DriverResult{Success: false, Error: fmt.Errorf("create job definition: %w", err).Error()}
 	}
 
-	if err := api.startJobDefinition(sid); err != nil {
-		return nil, fmt.Errorf("start job: %w", err)
+	if !job.IsRecurring {
+		if err := api.startJobDefinition(sid); err != nil {
+			return &protocol.DriverResult{Success: false, Error: fmt.Errorf("start job: %w", err).Error()}
+		}
 	}
 
-	return map[string]any{
-		"success":        true,
-		"scheduledRunId": sid,
-		"url":            consoleURL(api.Region, sid),
-	}, nil
+	return &protocol.DriverResult{
+		Success: true,
+		SubmitResult: &protocol.SubmitResult{
+			ID:  sid,
+			URL: consoleURL(api.Region, sid),
+		},
+	}
 }
 
-func schedule(api *ScalewayAPI, spec *protocol.JobSpec) (map[string]any, error) {
-	jd := buildJobDefinition(spec.Job, api.Project)
-	sid, err := api.createJobDefinition(jd)
-	if err != nil {
-		return nil, fmt.Errorf("create job definition: %w", err)
-	}
-
-	return map[string]any{
-		"success":        true,
-		"scheduledRunId": sid,
-		"url":            consoleURL(api.Region, sid),
-	}, nil
-}
-
-func list(api *ScalewayAPI) (map[string]any, error) {
+func listResult(api *ScalewayAPI) *protocol.DriverResult {
 	defs, err := api.listJobDefinitions()
 	if err != nil {
-		return nil, fmt.Errorf("list job definitions: %w", err)
+		return &protocol.DriverResult{Success: false, Error: fmt.Errorf("list job definitions: %w", err).Error()}
 	}
 
-	var entries []map[string]any
+	var entries []protocol.ScheduleEntry
 	for _, d := range defs {
 		schedule := ""
 		status := "active"
@@ -58,35 +52,37 @@ func list(api *ScalewayAPI) (map[string]any, error) {
 			status = d.Status
 		}
 
-		entries = append(entries, map[string]any{
-			"id":       d.ID,
-			"schedule": schedule,
-			"status":   status,
-			"url":      consoleURL(api.Region, d.ID),
+		entries = append(entries, protocol.ScheduleEntry{
+			ID:       d.ID,
+			Schedule: schedule,
+			Status:   status,
+			URL:      consoleURL(api.Region, d.ID),
 		})
 	}
 
-	return map[string]any{
-		"success": true,
-		"entries": entries,
-	}, nil
-}
-
-func deleteOp(api *ScalewayAPI, runID string) (map[string]any, error) {
-	if err := api.deleteJobDefinition(runID); err != nil {
-		return nil, fmt.Errorf("delete job definition: %w", err)
+	return &protocol.DriverResult{
+		Success: true,
+		ListResult: &protocol.ListResult{
+			Entries: entries,
+		},
 	}
-	return map[string]any{"success": true}, nil
 }
 
-func statusOp(api *ScalewayAPI, runID string) (map[string]any, error) {
-	jd, err := api.getJobDefinition(runID)
+func deleteResult(api *ScalewayAPI, id string) *protocol.DriverResult {
+	if err := api.deleteJobDefinition(id); err != nil {
+		return &protocol.DriverResult{Success: false, Error: fmt.Errorf("delete job definition: %w", err).Error()}
+	}
+	return &protocol.DriverResult{Success: true}
+}
+
+func statusResult(api *ScalewayAPI, id string) *protocol.DriverResult {
+	jd, err := api.getJobDefinition(id)
 	if err != nil {
-		return nil, fmt.Errorf("get job definition: %w", err)
+		return &protocol.DriverResult{Success: false, Error: fmt.Errorf("get job definition: %w", err).Error()}
 	}
 
 	var lastRunAt string
-	latest, err := api.latestJobRun(runID)
+	latest, err := api.latestJobRun(id)
 	if err == nil {
 		lastRunAt = latest.CreatedAt.Format(time.RFC3339)
 	}
@@ -109,15 +105,15 @@ func statusOp(api *ScalewayAPI, runID string) (map[string]any, error) {
 		}
 	}
 
-	return map[string]any{
-		"success": true,
-		"status": map[string]any{
-			"id":        jd.ID,
-			"state":     state,
-			"lastRunAt": lastRunAt,
-			"nextRunAt": nextRunAt,
+	return &protocol.DriverResult{
+		Success: true,
+		StatusResult: &protocol.StatusResult{
+			ID:        jd.ID,
+			State:     state,
+			LastRunAt: lastRunAt,
+			NextRunAt: nextRunAt,
 		},
-	}, nil
+	}
 }
 
 func consoleURL(region, id string) string {

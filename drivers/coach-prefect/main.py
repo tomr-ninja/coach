@@ -4,6 +4,8 @@ import json
 import os
 import sys
 
+PROTOCOL_VERSION = 1
+
 config_raw = os.environ.get("COACH_BACKEND_CONFIG", "{}")
 config = json.loads(config_raw)
 
@@ -15,6 +17,7 @@ from prefect.client.orchestration import get_client
 from prefect.client.schemas.actions import DeploymentScheduleCreate
 from prefect.client.schemas.objects import Flow
 from prefect.client.schemas.schedules import CronSchedule
+
 
 async def get_or_create_flow(client, flow_name):
     flows = await client.read_flows(limit=200)
@@ -61,20 +64,18 @@ def _build_deployment_params(job, flow_id):
     return params
 
 
-async def run_oneoff(client, job):
-    flow_name = job.get("flowName", "coach-container-runner")
+async def submit_job(client, job):
+    if not job.get("isWrapped", False):
+        return {"success": False, "error": "prefect driver requires wrapped images (S3 data); local data paths are not supported"}
+
+    flow_name = job.get("name", "coach-container-runner")
     flow = await get_or_create_flow(client, flow_name)
     params = _build_deployment_params(job, flow.id)
     deployment_id = await client.create_deployment(**params)
-    await client.create_flow_run_from_deployment(deployment_id)
-    return str(deployment_id)
 
+    if not job.get("isRecurring", False):
+        await client.create_flow_run_from_deployment(deployment_id)
 
-async def schedule(client, job):
-    flow_name = job.get("flowName", "coach-container-runner")
-    flow = await get_or_create_flow(client, flow_name)
-    params = _build_deployment_params(job, flow.id)
-    deployment_id = await client.create_deployment(**params)
     return str(deployment_id)
 
 
@@ -108,7 +109,6 @@ async def delete_deployment(client, run_id):
 
 async def deployment_status(client, run_id):
     from uuid import UUID
-    from datetime import timezone as _tz
 
     deployment = await client.read_deployment(UUID(str(run_id)))
     next_run = ""
@@ -134,44 +134,45 @@ async def deployment_status(client, run_id):
     }
 
 
+def write_result(result):
+    result["protocolVersion"] = PROTOCOL_VERSION
+    print(json.dumps(result))
+    sys.exit(0)
+
+
 def run():
     try:
         spec = json.load(sys.stdin)
     except json.JSONDecodeError as e:
-        print(json.dumps({"success": False, "error": f"invalid input json: {e}"}))
-        sys.exit(0)
+        write_result({"success": False, "error": f"invalid input json: {e}"})
 
-    operation = spec.get("operation")
+    spec_type = spec.get("type")
     job = spec.get("job", {})
-    run_id = spec.get("scheduledRunId")
+    run_id = spec.get("id")
 
     async def execute():
         async with get_client() as client:
-            if operation == "run":
-                sid = await run_oneoff(client, job)
-                return {"success": True, "scheduledRunId": sid}
-            elif operation == "schedule":
-                sid = await schedule(client, job)
-                return {"success": True, "scheduledRunId": sid}
-            elif operation == "list":
+            if spec_type == "submit":
+                sid = await submit_job(client, job)
+                return {"success": True, "submitResult": {"id": sid}}
+            elif spec_type == "list":
                 entries = await list_deployments(client)
-                return {"success": True, "entries": entries}
-            elif operation == "delete":
+                return {"success": True, "listResult": {"entries": entries}}
+            elif spec_type == "delete":
                 await delete_deployment(client, run_id)
                 return {"success": True}
-            elif operation == "status":
+            elif spec_type == "status":
                 st = await deployment_status(client, run_id)
-                return {"success": True, "status": st}
+                return {"success": True, "statusResult": st}
             else:
-                return {"success": False, "error": f"unknown operation: {operation}"}
+                return {"success": False, "error": f"unknown type: {spec_type}"}
 
     try:
         result = asyncio.run(execute())
     except Exception as e:
         result = {"success": False, "error": str(e)}
 
-    print(json.dumps(result))
-    sys.exit(0)
+    write_result(result)
 
 
 if __name__ == "__main__":

@@ -229,16 +229,11 @@ func buildJobDefinition(job *protocol.Job, projectID string) jobDefinitionReques
 		}
 	}
 
-	name := job.Name
-	if name == "" {
-		name = job.FlowName
-	}
-
 	env := make(map[string]string)
 	maps.Copy(env, model.EnvVars)
 
 	return jobDefinitionRequest{
-		Name:                 sanitizeName(name),
+		Name:                 sanitizeName(job.Name),
 		CPULimit:             defaultIfZero(job.Resources.CPUMillicores, defaultCPU),
 		MemoryLimit:          defaultIfZero(job.Resources.MemoryMi, defaultMem),
 		ImageURI:             model.Image,

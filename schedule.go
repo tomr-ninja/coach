@@ -64,17 +64,17 @@ func ScheduleCreate(
 	fingerprint := artifactFingerprint(digest, checksums)
 	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 
-	wrap := strings.HasPrefix(dataSource, "s3://")
-	if wrap && !strings.HasPrefix(outputURI, "s3://") {
+	wrapped := strings.HasPrefix(dataSource, "s3://")
+	if wrapped && !strings.HasPrefix(outputURI, "s3://") {
 		return "", fmt.Errorf("%w: s3 data source requires s3 output destination", errMixedLocalS3)
 	}
-	if !wrap && strings.HasPrefix(outputURI, "s3://") {
+	if !wrapped && strings.HasPrefix(outputURI, "s3://") {
 		return "", fmt.Errorf("%w: local data source requires local output destination", errMixedLocalS3)
 	}
 
 	var model protocol.Model
 
-	if wrap {
+	if wrapped {
 		if cfg.Registry == "" {
 			return "", fmt.Errorf("%w", errNoRegistry)
 		}
@@ -114,11 +114,12 @@ func ScheduleCreate(
 		}
 	}
 
-	flowName := fmt.Sprintf("coach-container-runner-%s", sanitizeImageName(modelImage))
+	name := fmt.Sprintf("coach-container-runner-%s", sanitizeImageName(modelImage))
 	job := &protocol.Job{
 		Fingerprint: fingerprintHex,
-		Name:        fmt.Sprintf("train-%s", modelImage),
-		FlowName:    flowName,
+		Name:        name,
+		IsRecurring: scheduleCron != "",
+		IsWrapped:   wrapped,
 		Model:       model,
 		Data: protocol.Data{
 			Sources:   []string{dataSource},
@@ -136,18 +137,21 @@ func ScheduleCreate(
 		job.Schedule = &protocol.Schedule{Cron: scheduleCron, Timezone: "UTC"}
 	}
 
-	op := "run"
-	if scheduleCron != "" {
-		op = "schedule"
+	spec := &protocol.Spec{
+		ProtocolVersion: protocol.ProtocolVersion,
+		Type:            "submit",
+		Job:             job,
 	}
-
-	spec := &protocol.JobSpec{Operation: op, Job: job}
 	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
 	if err != nil {
 		return "", fmt.Errorf("invoke driver: %w", err)
 	}
 
-	return result.ScheduledRunID, nil
+	if result.SubmitResult == nil {
+		return "", fmt.Errorf("driver returned no submit result")
+	}
+
+	return result.SubmitResult.ID, nil
 }
 
 func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
@@ -161,16 +165,23 @@ func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
 		return nil, err
 	}
 
-	spec := &protocol.JobSpec{Operation: "list"}
+	spec := &protocol.Spec{
+		ProtocolVersion: protocol.ProtocolVersion,
+		Type:            "list",
+	}
 	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
 	if err != nil {
 		return nil, fmt.Errorf("invoke driver: %w", err)
 	}
 
-	return result.Entries, nil
+	if result.ListResult == nil {
+		return nil, fmt.Errorf("driver returned no list result")
+	}
+
+	return result.ListResult.Entries, nil
 }
 
-func ScheduleDelete(backendName, runID string) error {
+func ScheduleDelete(backendName, id string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -181,7 +192,11 @@ func ScheduleDelete(backendName, runID string) error {
 		return err
 	}
 
-	spec := &protocol.JobSpec{Operation: "delete", ScheduledRunID: runID}
+	spec := &protocol.Spec{
+		ProtocolVersion: protocol.ProtocolVersion,
+		Type:            "delete",
+		ID:              id,
+	}
 	if _, err := InvokeDriver(backend.Driver, spec, backend.Config); err != nil {
 		return fmt.Errorf("invoke driver: %w", err)
 	}
@@ -189,7 +204,7 @@ func ScheduleDelete(backendName, runID string) error {
 	return nil
 }
 
-func ScheduleStatus(backendName, runID string) (*protocol.RunStatus, error) {
+func ScheduleStatus(backendName, id string) (*protocol.StatusResult, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -200,11 +215,19 @@ func ScheduleStatus(backendName, runID string) (*protocol.RunStatus, error) {
 		return nil, err
 	}
 
-	spec := &protocol.JobSpec{Operation: "status", ScheduledRunID: runID}
+	spec := &protocol.Spec{
+		ProtocolVersion: protocol.ProtocolVersion,
+		Type:            "status",
+		ID:              id,
+	}
 	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
 	if err != nil {
 		return nil, fmt.Errorf("invoke driver: %w", err)
 	}
 
-	return result.Status, nil
+	if result.StatusResult == nil {
+		return nil, fmt.Errorf("driver returned no status result")
+	}
+
+	return result.StatusResult, nil
 }

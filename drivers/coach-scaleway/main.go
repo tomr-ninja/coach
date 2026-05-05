@@ -9,15 +9,6 @@ import (
 	"github.com/tomr-ninja/coach/protocol"
 )
 
-type driverOutput struct {
-	Success        bool              `json:"success"`
-	ScheduledRunID string            `json:"scheduledRunId,omitempty"`
-	URL            string            `json:"url,omitempty"`
-	Entries        []json.RawMessage `json:"entries,omitempty"`
-	Status         json.RawMessage   `json:"status,omitempty"`
-	Error          string            `json:"error,omitempty"`
-}
-
 func main() {
 	cfgRaw := os.Getenv("COACH_BACKEND_CONFIG")
 	var cfg struct {
@@ -28,18 +19,18 @@ func main() {
 	}
 	if cfgRaw != "" {
 		if err := json.Unmarshal([]byte(cfgRaw), &cfg); err != nil {
-			writeError("parse COACH_BACKEND_CONFIG: " + err.Error())
-			os.Exit(1)
+			writeResult(&protocol.DriverResult{Success: false, Error: "parse COACH_BACKEND_CONFIG: " + err.Error()})
+			os.Exit(0)
 		}
 	}
 
 	if cfg.Token == "" {
-		writeError("secret_key is required. Set it in coach.json backends.scaleway.config")
-		os.Exit(1)
+		writeResult(&protocol.DriverResult{Success: false, Error: "secret_key is required. Set it in coach.json backends.scaleway.config"})
+		os.Exit(0)
 	}
 	if cfg.Project == "" {
-		writeError("project_id is required. Set it in coach.json backends.scaleway.config")
-		os.Exit(1)
+		writeResult(&protocol.DriverResult{Success: false, Error: "project_id is required. Set it in coach.json backends.scaleway.config"})
+		os.Exit(0)
 	}
 	if cfg.Region == "" {
 		cfg.Region = "fr-par"
@@ -47,94 +38,46 @@ func main() {
 
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		writeError("read stdin: " + err.Error())
-		os.Exit(1)
+		writeResult(&protocol.DriverResult{Success: false, Error: "read stdin: " + err.Error()})
+		os.Exit(0)
 	}
 
-	var spec protocol.JobSpec
+	var spec protocol.Spec
 	if uerr := json.Unmarshal(input, &spec); uerr != nil {
-		writeError("parse job spec: " + uerr.Error())
-		os.Exit(1)
+		writeResult(&protocol.DriverResult{Success: false, Error: "parse spec: " + uerr.Error()})
+		os.Exit(0)
 	}
 
 	baseURL := "https://api.scaleway.com/serverless-jobs/v1alpha2/regions/" + cfg.Region
 	api := NewScalewayAPI(baseURL, cfg.Token, cfg.Region, cfg.Project, cfg.Org)
 
-	var result driverOutput
-	var raw map[string]any
-	var opErr error
+	var result *protocol.DriverResult
 
-	switch spec.Operation {
-	case "run":
-		raw, opErr = run(api, &spec)
-	case "schedule":
-		raw, opErr = schedule(api, &spec)
+	switch spec.Type {
+	case "submit":
+		result = submit(api, spec.Job)
 	case "list":
-		raw, opErr = list(api)
+		result = listResult(api)
 	case "delete":
-		raw, opErr = deleteOp(api, spec.ScheduledRunID)
+		result = deleteResult(api, spec.ID)
 	case "status":
-		raw, opErr = statusOp(api, spec.ScheduledRunID)
+		result = statusResult(api, spec.ID)
 	default:
-		result = driverOutput{Success: false, Error: fmt.Sprintf("unknown operation: %s", spec.Operation)}
+		result = &protocol.DriverResult{Success: false, Error: fmt.Sprintf("unknown type: %s", spec.Type)}
 	}
 
-	if opErr != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", opErr)
-		result = driverOutput{Success: false, Error: opErr.Error()}
-	}
-
-	if raw != nil {
-		marshalResult(raw, &result)
-	}
-
-	out, err := json.Marshal(result)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "marshal result: %v\n", err)
-		out = []byte(`{"success":false,"error":"marshal result"}`)
-	}
-	fmt.Println(string(out))
+	writeResult(result)
 	os.Exit(0)
 }
 
-func marshalResult(raw map[string]any, result *driverOutput) {
-	if v, ok := raw["success"].(bool); ok {
-		result.Success = v
-	}
-	if v, ok := raw["scheduledRunId"].(string); ok {
-		result.ScheduledRunID = v
-	}
-	if v, ok := raw["url"].(string); ok {
-		result.URL = v
-	}
-	if v, ok := raw["error"].(string); ok {
-		result.Error = v
-	}
-	if entries, ok := raw["entries"].([]map[string]any); ok {
-		for _, e := range entries {
-			b, err := json.Marshal(e)
-			if err != nil {
-				continue
-			}
-			result.Entries = append(result.Entries, b)
-		}
-	}
-	if status, ok := raw["status"].(map[string]any); ok {
-		b, err := json.Marshal(status)
-		if err == nil {
-			result.Status = b
-		}
-	}
-}
-
-func writeError(msg string) {
-	fmt.Printf(`{"success":false,"error":%s}`, jsonMarshal(msg))
-}
-
-func jsonMarshal(s string) string {
-	b, err := json.Marshal(s)
+func writeResult(result *protocol.DriverResult) {
+	result.ProtocolVersion = protocol.ProtocolVersion
+	out, err := json.Marshal(result)
 	if err != nil {
-		return `""`
+		fmt.Fprintf(os.Stderr, "marshal result: %v\n", err)
+		bailout := `{"success":false,"error":"marshal result","protocolVersion":1}`
+		fmt.Println(bailout)
+		return
 	}
-	return string(b)
+	fmt.Println(string(out))
 }
