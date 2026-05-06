@@ -209,7 +209,11 @@ type jobRun struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func buildJobDefinition(job *protocol.Job, projectID string) jobDefinitionRequest {
+func buildJobDefinition(job *protocol.Job, projectID string) (jobDefinitionRequest, error) {
+	if job.Name == "" {
+		return jobDefinitionRequest{}, fmt.Errorf("buildJobDefinition: job.Name is empty")
+	}
+
 	model := job.Model
 
 	startupCmd := model.Command
@@ -243,5 +247,5 @@ func buildJobDefinition(job *protocol.Job, projectID string) jobDefinitionReques
 		EnvironmentVariables: env,
 		CronSchedule:         cronReq,
 		Description:          job.Fingerprint,
-	}
+	}, nil
 }

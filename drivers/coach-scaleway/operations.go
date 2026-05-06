@@ -14,7 +14,10 @@ func submit(api *ScalewayAPI, job *protocol.Job) *protocol.DriverResult {
 		return &protocol.DriverResult{Success: false, Error: "scaleway driver requires wrapped images (S3 data); local data paths are not supported"}
 	}
 
-	jd := buildJobDefinition(job, api.Project)
+	jd, err := buildJobDefinition(job, api.Project)
+	if err != nil {
+		return &protocol.DriverResult{Success: false, Error: fmt.Errorf("build job definition: %w", err).Error()}
+	}
 	sid, err := api.createJobDefinition(jd)
 	if err != nil {
 		return &protocol.DriverResult{Success: false, Error: fmt.Errorf("create job definition: %w", err).Error()}

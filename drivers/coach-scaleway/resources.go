@@ -23,6 +23,10 @@ func sanitizeName(s string) string {
 	}
 	name = strings.Trim(name, "-")
 
+	if len(name) == 0 {
+		panic("sanitizeName: empty string")
+	}
+
 	if len(name) < 3 {
 		name += "-job"
 	}
