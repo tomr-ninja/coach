@@ -51,28 +51,10 @@ func s3Checksums(uri string, cfg *Config) ([][32]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var opts []func(*config.LoadOptions) error
-	if cfg != nil && cfg.S3.AccessKeyID != "" {
-		opts = append(opts,
-			config.WithRegion(cfg.S3.Region),
-			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-				cfg.S3.AccessKeyID,
-				cfg.S3.SecretAccessKey,
-				"",
-			)),
-		)
-	}
-	awsCfg, err := config.LoadDefaultConfig(ctx, opts...)
+	client, err := newS3Client(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
+		return nil, err
 	}
-
-	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		if cfg != nil && cfg.S3.Endpoint != "" {
-			o.BaseEndpoint = aws.String(cfg.S3.Endpoint)
-			o.UsePathStyle = true
-		}
-	})
 
 	var checksums [][32]byte
 	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
@@ -111,4 +93,60 @@ func parseS3URI(uri string) (bucket, prefix string, err error) {
 		return rest, "", nil
 	}
 	return bucket, prefix, nil
+}
+
+func s3ArtifactExists(ctx context.Context, cfg *Config, s3PathOut string) (bool, error) {
+	bucket, prefix, err := parseS3PathOut(s3PathOut)
+	if err != nil {
+		return false, err
+	}
+
+	s3Client, err := newS3Client(ctx, cfg)
+	if err != nil {
+		return false, fmt.Errorf("create s3 client: %w", err)
+	}
+
+	resp, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  &bucket,
+		Prefix:  &prefix,
+		MaxKeys: aws.Int32(1),
+	})
+	if err != nil {
+		return false, fmt.Errorf("list s3 objects: %w", err)
+	}
+
+	return len(resp.Contents) > 0, nil
+}
+
+func parseS3PathOut(path string) (bucket, prefix string, err error) {
+	bucket, prefix, found := strings.Cut(path, "/")
+	if !found {
+		return "", "", fmt.Errorf("invalid s3 path: %s", path)
+	}
+	return bucket, prefix, nil
+}
+
+func newS3Client(ctx context.Context, cfg *Config) (*s3.Client, error) {
+	var opts []func(*config.LoadOptions) error
+	if cfg.S3.AccessKeyID != "" {
+		opts = append(opts,
+			config.WithRegion(cfg.S3.Region),
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+				cfg.S3.AccessKeyID,
+				cfg.S3.SecretAccessKey,
+				"",
+			)),
+		)
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+
+	return s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		if cfg.S3.Endpoint != "" {
+			o.BaseEndpoint = aws.String(cfg.S3.Endpoint)
+			o.UsePathStyle = true
+		}
+	}), nil
 }

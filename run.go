@@ -24,13 +24,20 @@ var (
 )
 
 func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
-	if strings.HasPrefix(dataDir, "s3://") {
+	dataIsS3 := strings.HasPrefix(dataDir, "s3://")
+	outputIsS3 := strings.HasPrefix(outputDir, "s3://")
+	if dataIsS3 != outputIsS3 {
+		return zeroFingerprint, errMixedLocalS3
+	}
+
+	if dataIsS3 && outputIsS3 {
 		cfg, err := LoadConfig()
 		if err != nil {
 			return zeroFingerprint, fmt.Errorf("load config: %w", err)
 		}
 		return RunS3(ctx, cfg, modelImage, dataDir, outputDir, force)
 	}
+
 	return RunLocal(ctx, modelImage, dataDir, outputDir, force)
 }
 
@@ -61,7 +68,7 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 	return fingerprint, nil
 }
 
-func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, localOutputDir string, force bool) ([32]byte, error) {
+func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, s3OutputDir string, force bool) ([32]byte, error) {
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
@@ -73,17 +80,32 @@ func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, localOutp
 		return zeroFingerprint, fmt.Errorf("resolve checksums: %w", err)
 	}
 
-	fingerprint, artifactsDir, err := resolveArtifactDir(ctx, client, modelImage, checksums, localOutputDir, force)
+	fingerprint, err := resolveFingerprint(ctx, client, modelImage, checksums)
 	if err != nil {
 		return zeroFingerprint, err
 	}
 
-	envVars := buildS3ContainerEnv(cfg, s3DataSource, artifactsDir)
-	if err := wrapAndRunS3(ctx, client, modelImage, fingerprint, envVars); err != nil {
-		return zeroFingerprint, err
+	fingerprintHex := fmt.Sprintf("%x", fingerprint)
+
+	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
+	s3PathOut := strings.TrimPrefix(s3OutputDir, "s3://")
+	if !strings.HasSuffix(s3PathOut, "/") {
+		s3PathOut += "/"
+	}
+	s3PathOut += fingerprintHex
+
+	if !force {
+		exists, err := s3ArtifactExists(ctx, cfg, s3PathOut)
+		if err != nil {
+			return zeroFingerprint, fmt.Errorf("check s3 artifact: %w", err)
+		}
+		if exists {
+			return zeroFingerprint, fmt.Errorf("%w: s3://%s", errArtifactExists, s3PathOut)
+		}
 	}
 
-	if err := validateArtifactDir(artifactsDir); err != nil {
+	envVars := buildS3ContainerEnv(cfg, s3PathIn, s3PathOut)
+	if err := wrapAndRunS3(ctx, client, modelImage, fingerprint, envVars); err != nil {
 		return zeroFingerprint, err
 	}
 
@@ -178,13 +200,20 @@ func CollectDataChecksums(dataDir string) ([][32]byte, error) {
 	return checksums, nil
 }
 
-func resolveArtifactDir(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte, outputDir string, force bool) (resultFP [32]byte, resultDir string, err error) {
+func resolveFingerprint(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte) ([32]byte, error) {
 	digest, err := client.ImageDigest(ctx, modelImage)
 	if err != nil {
-		return zeroFingerprint, "", fmt.Errorf("image digest: %w", err)
+		return zeroFingerprint, fmt.Errorf("image digest: %w", err)
+	}
+	return artifactFingerprint(digest, checksums), nil
+}
+
+func resolveArtifactDir(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte, outputDir string, force bool) (resultFP [32]byte, resultDir string, err error) {
+	fingerprint, err := resolveFingerprint(ctx, client, modelImage, checksums)
+	if err != nil {
+		return zeroFingerprint, "", err
 	}
 
-	fingerprint := artifactFingerprint(digest, checksums)
 	artifactsDir := filepath.Join(outputDir, fmt.Sprintf("%x", fingerprint))
 
 	if err := prepareArtifactDir(artifactsDir, force); err != nil {
@@ -194,13 +223,10 @@ func resolveArtifactDir(ctx context.Context, client *docker.Client, modelImage s
 	return fingerprint, artifactsDir, nil
 }
 
-func buildS3ContainerEnv(cfg *Config, s3DataSource, artifactsDir string) map[string]string {
-	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
-	s3PathOutAbs := filepath.Join(artifactsDir, "output")
-
+func buildS3ContainerEnv(cfg *Config, s3PathIn, s3PathOut string) map[string]string {
 	envVars := buildS3EnvVars(cfg.S3)
 	envVars["S3_PATH_IN"] = s3PathIn
-	envVars["S3_PATH_OUT"] = s3PathOutAbs
+	envVars["S3_PATH_OUT"] = s3PathOut
 
 	return envVars
 }

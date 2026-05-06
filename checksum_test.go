@@ -45,6 +45,33 @@ func TestParseS3URI(t *testing.T) {
 	}
 }
 
+func TestParseS3PathOut(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantBucket string
+		wantPrefix string
+		wantErr    bool
+	}{
+		{"bucket and prefix", "bucket/output/abcd", "bucket", "output/abcd", false},
+		{"nested prefix", "my-bucket/data/results/fingerprint", "my-bucket", "data/results/fingerprint", false},
+		{"no slash", "bucketonly", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bucket, prefix, err := parseS3PathOut(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantBucket, bucket)
+			assert.Equal(t, tt.wantPrefix, prefix)
+		})
+	}
+}
+
 func TestCollectDataChecksums(t *testing.T) {
 	t.Run("single file", func(t *testing.T) {
 		dir := t.TempDir()

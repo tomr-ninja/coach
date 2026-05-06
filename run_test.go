@@ -104,10 +104,10 @@ func TestBuildS3ContainerEnv(t *testing.T) {
 		},
 	}
 
-	got := buildS3ContainerEnv(cfg, "s3://bucket/data", "/output/artifacts")
+	got := buildS3ContainerEnv(cfg, "bucket/data", "bucket/output/abcd1234")
 
 	assert.Equal(t, "bucket/data", got["S3_PATH_IN"])
-	assert.Equal(t, "/output/artifacts/output", got["S3_PATH_OUT"])
+	assert.Equal(t, "bucket/output/abcd1234", got["S3_PATH_OUT"])
 	assert.Equal(t, "s3", got["RCLONE_CONFIG_S3-STORAGE_TYPE"])
 	assert.Equal(t, "key", got["RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID"])
 	assert.Equal(t, "secret", got["RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY"])
