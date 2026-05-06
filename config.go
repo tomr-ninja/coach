@@ -15,6 +15,7 @@ var (
 	errNoBackend       = errors.New("no backend specified and no defaultBackend configured")
 	errBackendNotFound = errors.New("backend not found in config")
 	errEnvVarNotSet    = errors.New("environment variable not set")
+	errUnsupportedType = errors.New("expandEnvInValue: unsupported type")
 )
 
 type S3Config struct {
@@ -159,7 +160,7 @@ func expandEnvInValue(val reflect.Value) error {
 		}
 		val.SetString(expanded)
 	default:
-		panic("expandEnvInValue: unsupported type")
+		return fmt.Errorf("%w: %v", errUnsupportedType, val.Kind())
 	}
 
 	return nil
