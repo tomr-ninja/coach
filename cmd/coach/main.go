@@ -55,6 +55,16 @@ func main() {
 			fatal("flags -model, -data, and -output are required")
 		}
 
+		if err := coach.ValidateModelImage(model); err != nil {
+			fatal("invalid model image: %v", err)
+		}
+		if err := coach.ValidateDataPath(data); err != nil {
+			fatal("invalid data path: %v", err)
+		}
+		if err := coach.ValidateOutputDir(output); err != nil {
+			fatal("invalid output path: %v", err)
+		}
+
 		ctx, cancel := signalContext()
 		defer cancel()
 
@@ -69,6 +79,9 @@ func main() {
 			fatal("usage: coach list-scripts <model-image>")
 		}
 		modelImage := os.Args[2]
+		if err := coach.ValidateModelImage(modelImage); err != nil {
+			fatal("invalid model image: %v", err)
+		}
 
 		ctx, cancel := signalContext()
 		defer cancel()
@@ -105,6 +118,19 @@ func main() {
 		}
 		scriptName := remaining[1]
 		args := remaining[2:]
+
+		if err := coach.ValidateModelImage(modelImage); err != nil {
+			fatal("invalid model image: %v", err)
+		}
+		if err := coach.ValidateScriptName(scriptName); err != nil {
+			fatal("invalid script name: %v", err)
+		}
+		if err := coach.ValidateDataPath(data); err != nil {
+			fatal("invalid data path: %v", err)
+		}
+		if err := coach.ValidateOutputDir(output); err != nil {
+			fatal("invalid output path: %v", err)
+		}
 
 		ctx, cancel := signalContext()
 		defer cancel()
@@ -154,6 +180,24 @@ func main() {
 
 			if model == "" || dataSource == "" || outputURI == "" {
 				fatal("flags -model, -data, and -output are required")
+			}
+
+			if err := coach.ValidateModelImage(model); err != nil {
+				fatal("invalid model image: %v", err)
+			}
+			if err := coach.ValidateDataPath(dataSource); err != nil {
+				fatal("invalid data source: %v", err)
+			}
+			if err := coach.ValidateOutputDir(outputURI); err != nil {
+				fatal("invalid output destination: %v", err)
+			}
+			if err := coach.ValidateCron(sched); err != nil {
+				fatal("invalid schedule: %v", err)
+			}
+			if script != "" {
+				if err := coach.ValidateScriptName(script); err != nil {
+					fatal("invalid script name: %v", err)
+				}
 			}
 
 			labelMap := parseLabels(labels)

@@ -24,6 +24,16 @@ var (
 )
 
 func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
+	if err := ValidateModelImage(modelImage); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate model image: %w", err)
+	}
+	if err := ValidateDataPath(dataDir); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate data path: %w", err)
+	}
+	if err := ValidateOutputDir(outputDir); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate output dir: %w", err)
+	}
+
 	dataIsS3 := strings.HasPrefix(dataDir, "s3://")
 	outputIsS3 := strings.HasPrefix(outputDir, "s3://")
 	if dataIsS3 != outputIsS3 {
@@ -42,6 +52,16 @@ func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool)
 }
 
 func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
+	if err := ValidateModelImage(modelImage); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate model image: %w", err)
+	}
+	if err := ValidateDataPath(dataDir); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate data path: %w", err)
+	}
+	if err := ValidateOutputDir(outputDir); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate output dir: %w", err)
+	}
+
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
@@ -69,6 +89,16 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 }
 
 func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, s3OutputDir string, force bool) ([32]byte, error) {
+	if err := ValidateModelImage(modelImage); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate model image: %w", err)
+	}
+	if err := ValidateDataPath(s3DataSource); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate data path: %w", err)
+	}
+	if err := ValidateOutputDir(s3OutputDir); err != nil {
+		return zeroFingerprint, fmt.Errorf("validate output dir: %w", err)
+	}
+
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)

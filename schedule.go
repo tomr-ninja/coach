@@ -26,6 +26,24 @@ func ScheduleCreate(
 	resources protocol.Resources,
 	labels map[string]string,
 ) (string, error) {
+	if err := ValidateModelImage(modelImage); err != nil {
+		return "", fmt.Errorf("validate model image: %w", err)
+	}
+	if err := ValidateDataPath(dataSource); err != nil {
+		return "", fmt.Errorf("validate data source: %w", err)
+	}
+	if err := ValidateOutputDir(outputURI); err != nil {
+		return "", fmt.Errorf("validate output destination: %w", err)
+	}
+	if err := ValidateCron(scheduleCron); err != nil {
+		return "", fmt.Errorf("validate schedule: %w", err)
+	}
+	if script != "" {
+		if err := ValidateScriptName(script); err != nil {
+			return "", fmt.Errorf("validate script name: %w", err)
+		}
+	}
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		return "", fmt.Errorf("load config: %w", err)
