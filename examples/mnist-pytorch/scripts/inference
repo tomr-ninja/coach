@@ -3,7 +3,7 @@
 MNIST inference script for Coach.
 
 Reads a checkpoint from /output, loads the model, and runs predictions
-on images from /data/mnist.
+on images from /data.
 
 Expected to be run via:
     coach run-script <model-image> inference --samples 20
@@ -18,7 +18,7 @@ from torchvision import datasets, transforms
 
 # Coach mounts: data/ -> /data, output/ -> /output
 ARTIFACT_ROOT = "/output"
-DATA_ROOT = "/data/mnist"
+DATA_ROOT = "/data"
 
 
 def print_usage():

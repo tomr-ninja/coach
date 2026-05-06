@@ -19,17 +19,17 @@ func TestBuildS3EnvVars(t *testing.T) {
 	}
 
 	got := buildS3EnvVars(cfg)
-	assert.Equal(t, "s3", got["RCLONE_CONFIG_S3-STORAGE_TYPE"])
-	assert.Equal(t, "Minio", got["RCLONE_CONFIG_S3-STORAGE_PROVIDER"])
-	assert.Equal(t, "key", got["RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID"])
-	assert.Equal(t, "secret", got["RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY"])
-	assert.Equal(t, "us-east-1", got["RCLONE_CONFIG_S3-STORAGE_REGION"])
-	assert.Equal(t, "http://localhost:9000", got["RCLONE_CONFIG_S3-STORAGE_ENDPOINT"])
+	assert.Equal(t, "s3", got["RCLONE_CONFIG_S3_TYPE"])
+	assert.Equal(t, "Minio", got["RCLONE_CONFIG_S3_PROVIDER"])
+	assert.Equal(t, "key", got["RCLONE_CONFIG_S3_ACCESS_KEY_ID"])
+	assert.Equal(t, "secret", got["RCLONE_CONFIG_S3_SECRET_ACCESS_KEY"])
+	assert.Equal(t, "us-east-1", got["RCLONE_CONFIG_S3_REGION"])
+	assert.Equal(t, "http://localhost:9000", got["RCLONE_CONFIG_S3_ENDPOINT"])
 }
 
 func TestBuildS3EnvVarsDefaultsProvider(t *testing.T) {
 	got := buildS3EnvVars(S3Config{})
-	assert.Equal(t, "AWS", got["RCLONE_CONFIG_S3-STORAGE_PROVIDER"])
+	assert.Equal(t, "AWS", got["RCLONE_CONFIG_S3_PROVIDER"])
 }
 
 func TestExpandEnvString(t *testing.T) {

@@ -45,6 +45,18 @@ So from the model's perspective, you simply write to `/output`; coach handles th
 coach run --model <model-image> [--data <data-folder>] [--output <output-folder>] [--force]
 ```
 
+`--data` and `--output` default to `./data` and `./output` if omitted.
+
+You can also pass S3 URIs for `--data` and `--output` to run locally with S3-backed data:
+
+```shell
+coach run --model my-model:v1 --data s3://my-bucket/training-data/ --output s3://my-bucket/output/
+```
+
+When S3 URIs are used, Coach builds and runs a wrapper container (same as described
+in the [Container bridge](#container-bridge--how-s3-wrapping-works) section), pulling data from S3 before training
+and pushing results back after.
+
 ## Scheduling on remote backends
 
 `coach schedule` submits training jobs to remote backends (Prefect, Scaleway, Vertex AI, etc.) via external driver executables.
@@ -107,12 +119,15 @@ coach schedule create \
   --schedule "0 */6 * * *" \
   --cpu 4 \
   --memory 16Gi \
+  --gpu 1 \
+  --gpu-type T4 \
   --label env=prod
 ```
 
 Omit `--schedule` for a one-off run. `--data` accepts a single source (local path or `s3://` URI).
 Data source and output must either both be local or both be S3 — mixing is not allowed.
-`--script` runs a named script from `/scripts/` in the container; `--command` passes additional command args.
+`--script` runs a named script from `/scripts/` in the container; `--command` passes additional command args
+(e.g. `--command python --command -u --command train.py`).
 
 **List scheduled runs:**
 
@@ -156,17 +171,17 @@ This means drivers never need to understand S3, fetch data, or manage uploads �
 
 When the wrapper container starts, `entrypoint.sh` runs three phases:
 
-1. **Phase 1: Pull** — `rclone copy s3-storage:$S3_PATH_IN /data` (downloads all data)
+1. **Phase 1: Pull** — `rclone copy s3:$S3_PATH_IN /data` (downloads all data)
 2. **Phase 2: Train** — runs your model's original entrypoint + cmd (reads `/data`, writes `/output`)
-3. **Phase 3: Push** — `rclone copy /output s3-storage:$S3_PATH_OUT` (uploads results)
+3. **Phase 3: Push** — `rclone copy /output s3:$S3_PATH_OUT` (uploads results)
 
-The rclone remote name is hardcoded to `s3-storage` inside the wrapper. Credentials come from the `s3` block
-in `coach.json`, which are converted to `RCLONE_CONFIG_S3-STORAGE_*` env vars and injected into the container.
+The rclone remote name is hardcoded to `s3` inside the wrapper. Credentials come from the `s3` block
+in `coach.json`, which are converted to `RCLONE_CONFIG_S3_*` env vars and injected into the container.
 
 #### Requirements
 
 - `registry` field set in `coach.json` with your container registry (e.g. `docker.io/myorg`)
-- `registryAuth` in `coach.json` with base64-encoded credentials (optional, only for private registries)
+- `registryAuth` in `coach.json` with registry credentials in `username:password` format (optional, only for private registries)
 - `s3` block in `coach.json` with S3 credentials
 - Docker daemon accessible for building and pushing the wrapper image
 
@@ -208,11 +223,11 @@ The driver receives:
     "envVars": {
       "S3_PATH_IN": "my-bucket/training-data/",
       "S3_PATH_OUT": "my-bucket/output/abc123def456",
-      "RCLONE_CONFIG_S3-STORAGE_TYPE": "s3",
-      "RCLONE_CONFIG_S3-STORAGE_PROVIDER": "AWS",
-      "RCLONE_CONFIG_S3-STORAGE_REGION": "us-east-1",
-      "RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID": "AKIA...",
-      "RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY": "..."
+      "RCLONE_CONFIG_S3_TYPE": "s3",
+      "RCLONE_CONFIG_S3_PROVIDER": "AWS",
+      "RCLONE_CONFIG_S3_REGION": "us-east-1",
+      "RCLONE_CONFIG_S3_ACCESS_KEY_ID": "AKIA...",
+      "RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": "..."
     }
   }
 }

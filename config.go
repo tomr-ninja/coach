@@ -45,12 +45,12 @@ func buildS3EnvVars(s3 S3Config) map[string]string {
 		provider = "AWS"
 	}
 	return map[string]string{
-		"RCLONE_CONFIG_S3-STORAGE_TYPE":              "s3",
-		"RCLONE_CONFIG_S3-STORAGE_PROVIDER":          provider,
-		"RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID":     s3.AccessKeyID,
-		"RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY": s3.SecretAccessKey,
-		"RCLONE_CONFIG_S3-STORAGE_REGION":            s3.Region,
-		"RCLONE_CONFIG_S3-STORAGE_ENDPOINT":          s3.Endpoint,
+		"RCLONE_CONFIG_S3_TYPE":              "s3",
+		"RCLONE_CONFIG_S3_PROVIDER":          provider,
+		"RCLONE_CONFIG_S3_ACCESS_KEY_ID":     s3.AccessKeyID,
+		"RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": s3.SecretAccessKey,
+		"RCLONE_CONFIG_S3_REGION":            s3.Region,
+		"RCLONE_CONFIG_S3_ENDPOINT":          s3.Endpoint,
 	}
 }
 

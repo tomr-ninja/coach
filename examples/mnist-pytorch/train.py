@@ -2,7 +2,7 @@
 """
 MNIST CNN training example for Coach.
 
-Expects MNIST data to be mounted at /data/mnist (via Coach).
+Expects MNIST data to be mounted at /data (via Coach).
 Writes model checkpoint and metrics to /output/.
 """
 
@@ -20,7 +20,6 @@ from torchvision import datasets, transforms
 # Coach mounts: data/ -> /data, output/ -> /output
 DATA_DIR = "/data"
 OUTPUT_DIR = "/output"
-MNIST_ROOT = os.path.join(DATA_DIR, "mnist")
 
 CONFIG = {
     "epochs": 3,
@@ -104,9 +103,8 @@ def evaluate(model, loader, criterion, device):
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    if not os.path.isdir(MNIST_ROOT):
-        print(f"ERROR: MNIST data not found at {MNIST_ROOT}", file=sys.stderr)
-        print("Run 'python get-data.py' first to populate the data folder.", file=sys.stderr)
+    if not os.path.isdir(os.path.join(DATA_DIR, "MNIST", "raw")):
+        print(f"ERROR: MNIST data not found at {DATA_DIR}/MNIST/raw", file=sys.stderr)
         sys.exit(1)
 
     # Resolve device
@@ -123,8 +121,8 @@ def main():
     ])
 
     # Coach mounts data/ into /data; download=False because data is already there
-    train_dataset = datasets.MNIST(root=MNIST_ROOT, train=True, download=False, transform=transform)
-    test_dataset = datasets.MNIST(root=MNIST_ROOT, train=False, download=False, transform=transform)
+    train_dataset = datasets.MNIST(root=DATA_DIR, train=True, download=False, transform=transform)
+    test_dataset = datasets.MNIST(root=DATA_DIR, train=False, download=False, transform=transform)
 
     train_loader = DataLoader(train_dataset, batch_size=CONFIG["batch_size"], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=CONFIG["batch_size"], shuffle=False)
