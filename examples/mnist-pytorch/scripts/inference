@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""
+MNIST inference script for Coach.
+
+Reads a checkpoint from /output, loads the model, and runs predictions
+on images from /data/mnist.
+
+Expected to be run via:
+    coach run-script <model-image> inference --samples 20
+"""
+
+import json
+import os
+import sys
+
+import torch
+from torchvision import datasets, transforms
+
+# Coach mounts: data/ -> /data, output/ -> /output
+ARTIFACT_ROOT = "/output"
+DATA_ROOT = "/data/mnist"
+
+
+def print_usage():
+    print(f"Usage: {sys.argv[0]} [--samples N] [--dump-metrics]", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_args():
+    args = {"samples": 20, "dump_metrics": False}
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] in ("-h", "--help"):
+            print_usage()
+        elif sys.argv[i] == "--samples":
+            i += 1
+            if i >= len(sys.argv):
+                print_usage()
+            args["samples"] = int(sys.argv[i])
+        elif sys.argv[i] == "--dump-metrics":
+            args["dump_metrics"] = True
+        else:
+            print(f"Unknown argument: {sys.argv[i]}", file=sys.stderr)
+            print_usage()
+        i += 1
+    return args
+
+
+class ConvNet(torch.nn.Module):
+    """Same architecture as the training model."""
+
+    def __init__(self):
+        super().__init__()
+        self.features = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 32, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(2),
+            torch.nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool2d(2),
+        )
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Flatten(),
+            torch.nn.Linear(64 * 7 * 7, 128),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.5),
+            torch.nn.Linear(128, 10),
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        return self.classifier(x)
+
+
+def find_artifact_dir(base_dir: str) -> str:
+    """Find the artifact directory containing model.pt under /output."""
+    # Direct hit
+    direct = os.path.join(base_dir, "model.pt")
+    if os.path.isfile(direct):
+        return base_dir
+
+    # Search one level of subdirectories for model.pt
+    candidates = []
+    try:
+        for entry in os.listdir(base_dir):
+            candidate = os.path.join(base_dir, entry)
+            if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "model.pt")):
+                mtime = os.path.getmtime(os.path.join(candidate, "model.pt"))
+                candidates.append((mtime, candidate))
+    except FileNotFoundError:
+        pass
+
+    if not candidates:
+        return base_dir  # fallback
+
+    # Newest model.pt wins
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def main():
+    args = parse_args()
+
+    artifact_dir = find_artifact_dir(ARTIFACT_ROOT)
+    model_path = os.path.join(artifact_dir, "model.pt")
+    if not os.path.isfile(model_path):
+        print(f"ERROR: No model.pt found under {ARTIFACT_ROOT} (searched {artifact_dir})", file=sys.stderr)
+        sys.exit(1)
+
+    # Load checkpoint with metadata
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+    metadata = {
+        "config": checkpoint.get("config", {}),
+        "architecture": checkpoint.get("architecture", "ConvNet"),
+        "input_shape": checkpoint.get("input_shape", [1, 28, 28]),
+        "num_classes": checkpoint.get("num_classes", 10),
+    }
+
+    print(f"Checkpoint: {model_path}")
+    print(f"  Architecture: {metadata['architecture']}")
+    print(f"  Input shape:  {metadata['input_shape']}")
+    print(f"  Num classes:  {metadata['num_classes']}")
+    print(f"  Epochs trained: {metadata['config'].get('epochs', '?')}")
+    print()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}\n")
+
+    model = ConvNet().to(device)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+
+    # Load test data
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,)),
+    ])
+
+    # Load test data
+    if not os.path.isdir(DATA_ROOT):
+        print(f"ERROR: MNIST data not found at {DATA_ROOT}", file=sys.stderr)
+        sys.exit(1)
+
+    test_dataset = datasets.MNIST(root=DATA_ROOT, train=False, download=False, transform=transform)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=64, shuffle=False)
+
+    # Print metrics if available
+    metrics_path = os.path.join(artifact_dir, "metrics.json")
+    if args["dump_metrics"] and os.path.isfile(metrics_path):
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        print("--- metrics.json ---")
+        print(json.dumps(metrics, indent=2))
+        print()
+
+    # Random sample predictions
+    total = len(test_dataset)
+    indices = torch.randperm(total)[: args["samples"]]
+    print(f"Random predictions ({args['samples']} of {total} test samples):")
+    print("-" * 40)
+    with torch.no_grad():
+        for idx in indices:
+            image, label = test_dataset[idx]
+            output = model(image.unsqueeze(0).to(device))
+            pred = output.argmax(dim=1).item()
+            status = "✓" if pred == label else "✗"
+            print(f"  idx={idx:>4}  true={label}  pred={pred}  {status}")
+
+    # Full test-set accuracy
+    correct = 0
+    total_count = 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = outputs.max(1)
+            total_count += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+
+    accuracy = 100.0 * correct / total_count
+    print("-" * 40)
+    print(f"Full test-set accuracy: {accuracy:.2f}% ({correct}/{total_count})\n")
+
+
+if __name__ == "__main__":
+    main()

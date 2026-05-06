@@ -17,12 +17,12 @@ func ListScripts(ctx context.Context, modelImage string) ([]string, error) {
 	return client.ListScripts(ctx, modelImage)
 }
 
-func RunScript(ctx context.Context, modelImage string, script string, args []string) error {
+func RunScript(ctx context.Context, modelImage string, script string, args []string, dataDir string, outputDir string) error {
 	client, err := docker.NewRealDockerClient()
 	if err != nil {
 		return fmt.Errorf("create docker client: %w", err)
 	}
 	defer client.Close()
 
-	return client.RunScript(ctx, modelImage, script, args)
+	return client.RunScript(ctx, modelImage, script, args, dataDir, outputDir)
 }

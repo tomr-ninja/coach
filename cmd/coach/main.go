@@ -82,21 +82,34 @@ func main() {
 		}
 
 	case "run-script":
-		if len(os.Args) < 3 {
-			fatal("usage: coach run-script <model-image> <script-name> [args...]")
-		}
-		modelImage := os.Args[2]
+		var (
+			data   string
+			output string
+		)
 
-		if len(os.Args) < 4 {
-			fatal("usage: coach run-script <model-image> <script-name> [args...]")
+		runScriptFlags := flag.NewFlagSet("run-script", flag.ExitOnError)
+		runScriptFlags.StringVar(&data, "data", "./data", "Path to the data folder")
+		runScriptFlags.StringVar(&output, "output", "./output", "Path to the output folder")
+		if err := runScriptFlags.Parse(os.Args[2:]); err != nil {
+			fatal("error parsing flags: %v", err)
 		}
-		scriptName := os.Args[3]
-		args := os.Args[4:]
+
+		remaining := runScriptFlags.Args()
+		if len(remaining) < 1 {
+			fatal("usage: coach run-script [-data <dir>] [-output <dir>] <model-image> <script-name> [args...]")
+		}
+		modelImage := remaining[0]
+
+		if len(remaining) < 2 {
+			fatal("usage: coach run-script [-data <dir>] [-output <dir>] <model-image> <script-name> [args...]")
+		}
+		scriptName := remaining[1]
+		args := remaining[2:]
 
 		ctx, cancel := signalContext()
 		defer cancel()
 
-		if err := coach.RunScript(ctx, modelImage, scriptName, args); err != nil {
+		if err := coach.RunScript(ctx, modelImage, scriptName, args, data, output); err != nil {
 			fatal("error running script: %v", err)
 		}
 

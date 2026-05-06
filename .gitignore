@@ -1,6 +1,8 @@
+coach
 coach.json
-.s3
 __pycache__/
 .venv/
 *.pyc
 drivers/coach-scaleway/coach-scaleway
+.pi
+.idea

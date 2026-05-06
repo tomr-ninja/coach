@@ -368,8 +368,23 @@ func (c *Client) ListScripts(ctx context.Context, imageName string) ([]string, e
 	return scripts, nil
 }
 
-func (c *Client) RunScript(ctx context.Context, imageName string, script string, args []string) error {
+func (c *Client) RunScript(ctx context.Context, imageName string, script string, args []string, dataDir string, outputDir string) error {
 	cmd := append([]string{"/scripts/" + script}, args...)
+
+	absData, err := filepath.Abs(dataDir)
+	if err != nil {
+		return fmt.Errorf("resolve data dir: %w", err)
+	}
+	if _, statErr := os.Stat(absData); statErr != nil {
+		return fmt.Errorf("data dir %s does not exist: %w", absData, statErr)
+	}
+	absOutput, err := filepath.Abs(outputDir)
+	if err != nil {
+		return fmt.Errorf("resolve output dir: %w", err)
+	}
+	if _, statErr := os.Stat(absOutput); statErr != nil {
+		return fmt.Errorf("output dir %s does not exist: %w", absOutput, statErr)
+	}
 
 	resp, err := c.internal.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{
@@ -380,7 +395,22 @@ func (c *Client) RunScript(ctx context.Context, imageName string, script string,
 			AttachStdout: true,
 			AttachStderr: true,
 		},
-		HostConfig: &container.HostConfig{},
+		HostConfig: &container.HostConfig{
+			Mounts: []mount.Mount{
+				{
+					Type:     mount.TypeBind,
+					Source:   absData,
+					Target:   "/data",
+					ReadOnly: true,
+				},
+				{
+					Type:   mount.TypeBind,
+					Source: absOutput,
+					Target: "/output",
+				},
+			},
+			AutoRemove: true,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)

@@ -1,0 +1,12 @@
+[project]
+name = "coach-example-mnist-pytorch"
+version = "0.1.0"
+description = "MNIST CNN training example for Coach"
+requires-python = ">=3.14"
+dependencies = [
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+]
+
+[project.optional-dependencies]
+dev = []

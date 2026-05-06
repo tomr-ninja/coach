@@ -1,0 +1,17 @@
+# Generated artifacts — produced by Coach runs
+output/
+
+# Downloaded data — run get-data.py locally to populate this folder
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments (if uv sync is used locally)
+.venv/
+
+# macOS
+.DS_Store
