@@ -219,12 +219,15 @@ func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) 
 					Target: "/output",
 				},
 			},
-			AutoRemove: true,
+			AutoRemove: false,
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
+	defer func() {
+		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
+	}()
 
 	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start container: %w", err)
@@ -235,7 +238,6 @@ func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) 
 	})
 	select {
 	case <-ctx.Done():
-		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
 		return ctx.Err()
 	case err := <-waitResult.Error:
 		if err != nil {
@@ -243,6 +245,10 @@ func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) 
 		}
 	case status := <-waitResult.Result:
 		if status.StatusCode != 0 {
+			logs, _ := c.containerLogs(ctx, resp.ID)
+			if logs != "" {
+				return fmt.Errorf("%w: %d\n%s", errContainerExit, status.StatusCode, logs)
+			}
 			return fmt.Errorf("%w: %d", errContainerExit, status.StatusCode)
 		}
 	}
@@ -270,12 +276,15 @@ func (c *Client) RunWrapped(ctx context.Context, imageName string, envVars map[s
 			Env:   env,
 		},
 		HostConfig: &container.HostConfig{
-			AutoRemove: true,
+			AutoRemove: false,
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("create container: %w", err)
 	}
+	defer func() {
+		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
+	}()
 
 	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start container: %w", err)
@@ -286,7 +295,6 @@ func (c *Client) RunWrapped(ctx context.Context, imageName string, envVars map[s
 	})
 	select {
 	case <-ctx.Done():
-		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
 		return ctx.Err()
 	case err := <-waitResult.Error:
 		if err != nil {
@@ -294,11 +302,32 @@ func (c *Client) RunWrapped(ctx context.Context, imageName string, envVars map[s
 		}
 	case status := <-waitResult.Result:
 		if status.StatusCode != 0 {
+			logs, _ := c.containerLogs(ctx, resp.ID)
+			if logs != "" {
+				return fmt.Errorf("%w: %d\n%s", errContainerExit, status.StatusCode, logs)
+			}
 			return fmt.Errorf("%w: %d", errContainerExit, status.StatusCode)
 		}
 	}
 
 	return nil
+}
+
+func (c *Client) containerLogs(ctx context.Context, containerID string) (string, error) {
+	rc, err := c.internal.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer rc.Close()
+
+	var buf bytes.Buffer
+	if err := demuxDockerStream(rc, &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func (c *Client) Close() error {
@@ -425,13 +454,15 @@ func (c *Client) RunScript(ctx context.Context, imageName string, script string,
 		return fmt.Errorf("start container: %w", startErr)
 	}
 
+	var logBuf bytes.Buffer
+
 	rc, err := c.internal.ContainerLogs(ctx, resp.ID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
 	})
 	if err == nil {
-		if err := demuxDockerStream(rc, os.Stdout); err != nil {
+		if err := demuxDockerStream(rc, io.MultiWriter(os.Stdout, &logBuf)); err != nil {
 			return fmt.Errorf("read container logs: %w", err)
 		}
 	}
@@ -448,6 +479,9 @@ func (c *Client) RunScript(ctx context.Context, imageName string, script string,
 		}
 	case status := <-waitResult.Result:
 		if status.StatusCode != 0 {
+			if logBuf.Len() > 0 {
+				return fmt.Errorf("%w: %d\n%s", errContainerExit, status.StatusCode, logBuf.String())
+			}
 			return fmt.Errorf("%w: %d", errContainerExit, status.StatusCode)
 		}
 	}

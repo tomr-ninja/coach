@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	errNoDataFiles = errors.New("no data files found")
-	errNoS3Objects = errors.New("no objects found at s3 location")
-	errNotS3URI    = errors.New("not an s3 uri")
+	errNoDataFiles   = errors.New("no data files found")
+	errNoS3Objects   = errors.New("no objects found at s3 location")
+	errNotS3URI      = errors.New("not an s3 uri")
+	errInvalidS3Path = errors.New("invalid s3 path")
 )
 
 func ResolveChecksums(source string, cfg *Config) ([][32]byte, error) {
@@ -121,7 +122,7 @@ func s3ArtifactExists(ctx context.Context, cfg *Config, s3PathOut string) (bool,
 func parseS3PathOut(path string) (bucket, prefix string, err error) {
 	bucket, prefix, found := strings.Cut(path, "/")
 	if !found {
-		return "", "", fmt.Errorf("invalid s3 path: %s", path)
+		return "", "", fmt.Errorf("%w: %s", errInvalidS3Path, path)
 	}
 	return bucket, prefix, nil
 }
