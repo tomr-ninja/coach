@@ -3,6 +3,7 @@ package coach
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -67,6 +68,8 @@ func s3Checksums(uri string, cfg *Config) ([][32]byte, error) {
 			Prefix: &prefix,
 		})
 
+		tryChecksum := true
+
 		for paginator.HasMorePages() {
 			page, pageErr := paginator.NextPage(ctx)
 			if pageErr != nil {
@@ -76,6 +79,18 @@ func s3Checksums(uri string, cfg *Config) ([][32]byte, error) {
 				if strings.HasSuffix(*obj.Key, "/") {
 					continue
 				}
+
+				// Prefer S3 Object Checksum SHA-256 (real content hash) over ETag.
+				if tryChecksum {
+					if chk, ok := fetchObjectChecksum(ctx, client, bucket, *obj.Key); ok {
+						checksums = append(checksums, chk)
+						continue
+					}
+					// First miss — stop trying; remaining objects likely same upload method.
+					tryChecksum = false
+				}
+
+				// Fall back to ETag-based fingerprint.
 				etag := strings.Trim(*obj.ETag, `"`)
 				h := sha256.Sum256([]byte(etag))
 				checksums = append(checksums, h)
@@ -88,6 +103,28 @@ func s3Checksums(uri string, cfg *Config) ([][32]byte, error) {
 		return checksums, nil
 	})
 	return result, err
+}
+
+// fetchObjectChecksum retrieves the SHA-256 checksum of an S3 object via HeadObject.
+// Returns ([32]byte, true) if a checksum is available, or (zero, false) on failure/absence.
+func fetchObjectChecksum(ctx context.Context, client *s3.Client, bucket, key string) ([32]byte, bool) {
+	resp, err := client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	if err != nil || resp.ChecksumSHA256 == nil || *resp.ChecksumSHA256 == "" {
+		return [32]byte{}, false
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(*resp.ChecksumSHA256)
+	if err != nil || len(raw) != 32 {
+		return [32]byte{}, false
+	}
+
+	var out [32]byte
+	copy(out[:], raw)
+
+	return out, true
 }
 
 func parseS3URI(uri string) (bucket, prefix string, err error) {
