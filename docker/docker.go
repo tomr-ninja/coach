@@ -533,16 +533,40 @@ func parseDockerStream(r io.Reader, w io.Writer) error {
 		}
 
 		// Echo stream/status/id/progress to output.
-		for _, key := range []string{"stream", "status", "id", "progress", "progressDetail", "aux"} {
-			if v, ok := msg[key]; ok {
-				var s string
-				if json.Unmarshal(v, &s) == nil {
-					fmt.Fprint(w, s)
-				} else {
-					fmt.Fprintln(w, string(v))
-				}
-				break
+		if stream, ok := msg["stream"]; ok {
+			var s string
+			if json.Unmarshal(stream, &s) == nil {
+				fmt.Fprint(w, s)
 			}
+			continue
+		}
+
+		// Format push output: "id: status [progress]"
+		var parts []string
+		if idRaw, ok := msg["id"]; ok {
+			var id string
+			if json.Unmarshal(idRaw, &id) == nil && id != "" {
+				parts = append(parts, id+":")
+			}
+		}
+		if statusRaw, ok := msg["status"]; ok {
+			var st string
+			if json.Unmarshal(statusRaw, &st) == nil && st != "" {
+				parts = append(parts, st)
+			}
+		}
+		if progressRaw, ok := msg["progress"]; ok {
+			var prog string
+			if json.Unmarshal(progressRaw, &prog) == nil && prog != "" {
+				parts = append(parts, prog)
+			}
+		}
+		if auxRaw, ok := msg["aux"]; ok {
+			parts = append(parts, string(auxRaw))
+		}
+
+		if len(parts) > 0 {
+			fmt.Fprintln(w, strings.Join(parts, " "))
 		}
 	}
 
