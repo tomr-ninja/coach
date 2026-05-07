@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/tomr-ninja/flag3"
 
@@ -42,18 +43,19 @@ func main() {
 	schedule.Subcommand("ls")
 	schedule.Subcommand("delete")
 	schedule.Subcommand("status")
+	tree.Subcommand("cleanup")
 
 	cmd, err := flag3.ParseCLI(tree)
 	if err != nil {
 		handleError(coacherrors.New(coacherrors.KindUser,
-			fmt.Sprintf("invalid command: %v\ncommands: run, script, schedule", err)))
+			fmt.Sprintf("invalid command: %v\ncommands: run, script, schedule, cleanup", err)))
 	}
 
 	cmd.Next() // skip root (coach)
 
 	if !cmd.Next() {
 		handleError(coacherrors.New(coacherrors.KindUser,
-			"usage: coach <command> [<args>]\ncommands: run, script, schedule"))
+			"usage: coach <command> [<args>]\ncommands: run, script, schedule, cleanup"))
 	}
 
 	switch cmd.Command() {
@@ -294,9 +296,41 @@ func main() {
 				fmt.Sprintf("unknown schedule subcommand: %s\nusage: coach schedule <create|ls|delete|status>", cmd.Command())))
 		}
 
+	case "cleanup":
+		var (
+			dryRun bool
+			older  string
+		)
+
+		cleanupFlags := flag.NewFlagSet("cleanup", flag.ExitOnError)
+		cleanupFlags.BoolVar(&dryRun, "dry-run", false, "Print images that would be removed without removing them")
+		cleanupFlags.StringVar(&older, "older", "24h", "Remove images older than duration (e.g. 24h, 7d)")
+		if err := cleanupFlags.Parse(cmd.Args()); err != nil {
+			handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
+		}
+
+		var maxAge time.Duration
+		if older != "" {
+			var parseErr error
+			maxAge, parseErr = time.ParseDuration(older)
+			if parseErr != nil {
+				handleError(coacherrors.New(coacherrors.KindUser,
+					fmt.Sprintf("invalid duration %q (examples: 24h, 7d, 30m): %v", older, parseErr)))
+			}
+		}
+
+		ctx, cancel := signalContext()
+		defer cancel()
+
+		result, err := coach.Cleanup(ctx, maxAge, dryRun)
+		if err != nil {
+			handleError(err)
+		}
+		fmt.Printf("Cleanup complete: %d images removed, %d errors\n", result.Removed, result.Errors)
+
 	default:
 		handleError(coacherrors.New(coacherrors.KindUser,
-			fmt.Sprintf("unknown command: %s\ncommands: run, script, schedule", cmd.Command())))
+			fmt.Sprintf("unknown command: %s\ncommands: run, script, schedule, cleanup", cmd.Command())))
 	}
 }
 
@@ -328,10 +362,6 @@ func handleError(err error) {
 	fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 	if hint != "" {
 		fmt.Fprintf(os.Stderr, "Hint: %s\n", hint)
-	}
-
-	if os.Getenv("COACH_DEBUG") == "1" {
-		fmt.Fprintf(os.Stderr, "\n--- debug ---\n%s\n", coacherrors.DebugFormat(err))
 	}
 
 	os.Exit(coacherrors.ExitCode(kind))

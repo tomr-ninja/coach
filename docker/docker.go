@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
@@ -111,6 +112,29 @@ func (c *Client) ImagePush(ctx context.Context, tag, auth string) error {
 		return fmt.Errorf("push image %s: %w", tag, streamErr)
 	}
 	return nil
+}
+
+func (c *Client) ImageRemove(ctx context.Context, imageID string, force bool) error {
+	_, err := c.internal.ImageRemove(ctx, imageID, client.ImageRemoveOptions{
+		Force:         force,
+		PruneChildren: true,
+	})
+	if err != nil {
+		return fmt.Errorf("remove image %s: %w", imageID, err)
+	}
+	return nil
+}
+
+func (c *Client) ImageList(ctx context.Context, filterRef string) ([]image.Summary, error) {
+	opts := client.ImageListOptions{All: true}
+	if filterRef != "" {
+		opts.Filters = make(client.Filters).Add("reference", filterRef)
+	}
+	result, err := c.internal.ImageList(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("list images: %w", err)
+	}
+	return result.Items, nil
 }
 
 func registryAuth(imageTag, authStr string) string {

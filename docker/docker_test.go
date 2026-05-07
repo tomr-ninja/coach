@@ -620,6 +620,102 @@ func TestImageDigest_PullsIfAbsent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ImageRemove and ImageList tests
+// ---------------------------------------------------------------------------
+
+func TestImageRemove(t *testing.T) {
+	_, client := setupDockerPool(t)
+	tag := buildTestImage(t, client)
+	ctx := context.Background()
+
+	exists, err := client.ImageExists(ctx, tag)
+	require.NoError(t, err)
+	assert.True(t, exists, "image should exist before removal")
+
+	// Remove the image and verify it's gone.
+	err = client.ImageRemove(ctx, tag, true)
+	require.NoError(t, err, "force remove should succeed")
+
+	exists, err = client.ImageExists(ctx, tag)
+	if err != nil {
+		// ImageInspect returns an error for nonexistent images.
+		return
+	}
+	assert.False(t, exists, "image should not exist after removal")
+
+}
+
+func TestImageRemove_Nonexistent(t *testing.T) {
+	_, client := setupDockerPool(t)
+	ctx := context.Background()
+
+	err := client.ImageRemove(ctx, "nonexistent-image-xyz-123:latest", true)
+	require.Error(t, err, "removing non-existent image should fail")
+	assert.Contains(t, err.Error(), "remove image")
+}
+
+func TestImageList_All(t *testing.T) {
+	_, client := setupDockerPool(t)
+	ctx := context.Background()
+
+	images, err := client.ImageList(ctx, "")
+	require.NoError(t, err)
+	// At minimum, the alpine:3.21 images pulled during other tests should exist
+	assert.NotEmpty(t, images, "should list at least some images")
+}
+
+func TestImageList_FilterByPrefix(t *testing.T) {
+	_, client := setupDockerPool(t)
+
+	// Build an image with the wrapper prefix
+	tmpDir, err := os.MkdirTemp("", "coach-test-listfilter-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	dockerfile := `FROM alpine:3.21
+RUN echo "wrapped test" > /test.txt
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0o644))
+
+	buildCtx, err := BuildContextDir(tmpDir)
+	require.NoError(t, err)
+
+	tag := fmt.Sprintf("coach-wrapped-test-listfilter-%x:latest", time.Now().UnixNano())
+	ctx := context.Background()
+	err = client.ImageBuild(ctx, buildCtx, tag)
+	require.NoError(t, err)
+
+	// Clean up after test
+	t.Cleanup(func() {
+		_ = client.ImageRemove(context.Background(), tag, true)
+	})
+
+	// List with the wrapper prefix filter
+	images, err := client.ImageList(ctx, "coach-wrapped-*")
+	require.NoError(t, err)
+
+	found := false
+	for _, img := range images {
+		for _, repoTag := range img.RepoTags {
+			if repoTag == tag {
+				found = true
+				break
+			}
+		}
+	}
+	assert.True(t, found, "should find image with coach-wrapped- prefix")
+}
+
+func TestImageList_FilterNoMatch(t *testing.T) {
+	_, client := setupDockerPool(t)
+	ctx := context.Background()
+
+	images, err := client.ImageList(ctx, "nonexistent-prefix-zzz-*")
+	require.NoError(t, err)
+	assert.Empty(t, images, "should return empty list for non-matching filter")
+}
+
+// ---------------------------------------------------------------------------
 // Benchmark
 // ---------------------------------------------------------------------------
 

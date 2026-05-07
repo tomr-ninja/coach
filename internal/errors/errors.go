@@ -93,7 +93,7 @@ func (e *Error) Format() string {
 	return fmt.Sprintf("%s\nHint: %s", e.Message, e.Suggest)
 }
 
-// DebugFormat returns a full error chain for COACH_DEBUG output.
+// DebugFormat returns a full error chain for debugging output.
 // Each link in the chain is printed on its own indented line.
 func DebugFormat(err error) string {
 	var b strings.Builder

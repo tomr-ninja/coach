@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import asyncio
+import io
 import json
 import os
 import sys
+import traceback
 
 PROTOCOL_VERSION = 1
 
@@ -142,7 +144,7 @@ def write_result(result):
 
 def run():
     try:
-        spec = json.load(sys.stdin)
+        spec = json.load(io.BytesIO(sys.stdin.buffer.read(10_000_000)))
     except json.JSONDecodeError as e:
         write_result({"success": False, "error": f"invalid input json: {e}"})
 
@@ -170,6 +172,7 @@ def run():
     try:
         result = asyncio.run(execute())
     except Exception as e:
+        traceback.print_exc(file=sys.stderr)
         result = {"success": False, "error": str(e)}
 
     write_result(result)
