@@ -181,11 +181,11 @@ type DriverResult struct {
       "envVars": {
         "S3_PATH_IN": "bucket/data",
         "S3_PATH_OUT": "bucket/output/abc123def456",
-        "RCLONE_CONFIG_S3-STORAGE_TYPE": "s3",
-        "RCLONE_CONFIG_S3-STORAGE_PROVIDER": "AWS",
-        "RCLONE_CONFIG_S3-STORAGE_REGION": "us-east-1",
-        "RCLONE_CONFIG_S3-STORAGE_ACCESS_KEY_ID": "AKIA...",
-        "RCLONE_CONFIG_S3-STORAGE_SECRET_ACCESS_KEY": "..."
+        "RCLONE_CONFIG_S3_TYPE": "s3",
+        "RCLONE_CONFIG_S3_PROVIDER": "AWS",
+        "RCLONE_CONFIG_S3_REGION": "us-east-1",
+        "RCLONE_CONFIG_S3_ACCESS_KEY_ID": "AKIA...",
+        "RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": "..."
       }
     },
     "data": {
