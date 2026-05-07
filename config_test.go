@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
 func TestBuildS3EnvVars(t *testing.T) {
@@ -50,6 +52,7 @@ func TestExpandEnvString(t *testing.T) {
 		got, err := expandEnvString("$COACH_MISSING_VAR")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errEnvVarNotSet)
+		assert.Contains(t, coacherrors.GetHint(err), "replace \"$COACH_MISSING_VAR\" with a literal value")
 		assert.Empty(t, got)
 	})
 }
@@ -81,6 +84,7 @@ func TestExpandEnvInConfig(t *testing.T) {
 		_, err := expandEnvInConfig(raw)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errEnvVarNotSet)
+		assert.Contains(t, coacherrors.GetHint(err), "replace \"$COACH_MISSING\" with a literal value")
 	})
 
 	t.Run("multiple env vars", func(t *testing.T) {
@@ -118,6 +122,7 @@ func TestExpandEnvInStruct(t *testing.T) {
 		err := expandEnvInStruct(&cfg)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errEnvVarNotSet)
+		assert.Contains(t, coacherrors.GetHint(err), "replace \"$COACH_MISSING\" with a literal value")
 	})
 }
 

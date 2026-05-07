@@ -12,6 +12,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
+
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
 var (
@@ -52,36 +55,39 @@ func s3Checksums(uri string, cfg *Config) ([][32]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client, err := newS3Client(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	var checksums [][32]byte
-	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
-		Bucket: &bucket,
-		Prefix: &prefix,
-	})
-
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list s3 objects: %w", err)
+	result, err := coacherrors.Retry(ctx, coacherrors.RetryConfig{}, func() ([][32]byte, error) {
+		client, s3err := newS3Client(ctx, cfg)
+		if s3err != nil {
+			return nil, maybeTransient(s3err)
 		}
-		for _, obj := range page.Contents {
-			if strings.HasSuffix(*obj.Key, "/") {
-				continue
+
+		var checksums [][32]byte
+		paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
+			Bucket: &bucket,
+			Prefix: &prefix,
+		})
+
+		for paginator.HasMorePages() {
+			page, pageErr := paginator.NextPage(ctx)
+			if pageErr != nil {
+				return nil, maybeTransient(fmt.Errorf("list s3 objects: %w", pageErr))
 			}
-			etag := strings.Trim(*obj.ETag, `"`)
-			h := sha256.Sum256([]byte(etag))
-			checksums = append(checksums, h)
+			for _, obj := range page.Contents {
+				if strings.HasSuffix(*obj.Key, "/") {
+					continue
+				}
+				etag := strings.Trim(*obj.ETag, `"`)
+				h := sha256.Sum256([]byte(etag))
+				checksums = append(checksums, h)
+			}
 		}
-	}
 
-	if len(checksums) == 0 {
-		return nil, fmt.Errorf("%w: s3://%s/%s", errNoS3Objects, bucket, prefix)
-	}
-	return checksums, nil
+		if len(checksums) == 0 {
+			return nil, fmt.Errorf("%w: s3://%s/%s", errNoS3Objects, bucket, prefix)
+		}
+		return checksums, nil
+	})
+	return result, err
 }
 
 func parseS3URI(uri string) (bucket, prefix string, err error) {
@@ -150,4 +156,16 @@ func newS3Client(ctx context.Context, cfg *Config) (*s3.Client, error) {
 			o.UsePathStyle = true
 		}
 	}), nil
+}
+
+// maybeTransient wraps an S3 error as transient if it is a network error or HTTP 5xx.
+// Authentication errors (4xx) are left as permanent.
+func maybeTransient(err error) error {
+	if coacherrors.IsNetworkError(err) {
+		return coacherrors.AsTransient(err)
+	}
+	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok && respErr.HTTPStatusCode() >= 500 {
+		return coacherrors.AsTransient(err)
+	}
+	return err
 }

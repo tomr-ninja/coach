@@ -14,15 +14,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
+
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
 var (
 	errNoDigest      = errors.New("no digest found for image")
-	errContainerExit = errors.New("container exited with non-zero code")
+	errContainerExit = coacherrors.New(coacherrors.KindIO, "container exited with non-zero code")
 )
 
 type Client struct {
@@ -30,11 +33,13 @@ type Client struct {
 }
 
 func NewRealDockerClient() (*Client, error) {
-	cli, err := client.New(client.FromEnv)
-	if err != nil {
-		return nil, fmt.Errorf("create docker client: %w", err)
-	}
-	return &Client{internal: cli}, nil
+	return coacherrors.Retry(context.Background(), coacherrors.RetryConfig{MaxElapsed: 5 * time.Second}, func() (*Client, error) {
+		cli, err := client.New(client.FromEnv)
+		if err != nil {
+			return nil, fmt.Errorf("create docker client: %w", err)
+		}
+		return &Client{internal: cli}, nil
+	})
 }
 
 func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {

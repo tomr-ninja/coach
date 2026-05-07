@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"time"
 
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 	"github.com/tomr-ninja/coach/protocol"
 )
 
@@ -19,12 +20,12 @@ const (
 )
 
 var (
-	errDriverFailure        = errors.New("driver returned failure")
+	errDriverFailure        = coacherrors.New(coacherrors.KindDriver, "driver returned failure")
 	errDriverEmptyError     = errors.New("driver returned failure without error message")
-	errDriverNotFile        = errors.New("driver is a directory, not an executable")
-	errDriverNotExecutable  = errors.New("driver is not executable")
-	errDriverOutputTooLarge = errors.New("driver output exceeded limit")
-	errDriverVersion        = errors.New("driver protocol version mismatch")
+	errDriverNotFile        = coacherrors.New(coacherrors.KindUser, "driver is a directory, not an executable")
+	errDriverNotExecutable  = coacherrors.New(coacherrors.KindUser, "driver is not executable")
+	errDriverOutputTooLarge = coacherrors.New(coacherrors.KindInternal, "driver output exceeded limit")
+	errDriverVersion        = coacherrors.New(coacherrors.KindDriver, "driver protocol version mismatch")
 )
 
 func ValidateDriver(driverPath string) error {

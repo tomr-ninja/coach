@@ -8,13 +8,19 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
+
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
 var (
-	errConfigNotFound  = errors.New("coach.json not found in current directory or ~/.config/coach/")
-	errNoBackend       = errors.New("no backend specified and no defaultBackend configured")
-	errBackendNotFound = errors.New("backend not found in config")
-	errEnvVarNotSet    = errors.New("environment variable not set")
+	errConfigNotFound = errors.New("coach.json not found in current directory or ~/.config/coach/")
+	errNoBackend      = coacherrors.WithHint(
+		coacherrors.New(coacherrors.KindUser, "no backend configured"),
+		"Add a backend to coach.json and set defaultBackend, or pass --backend",
+	)
+	errBackendNotFound = coacherrors.New(coacherrors.KindUser, "backend not found in config")
+	errEnvVarNotSet    = coacherrors.New(coacherrors.KindUser, "environment variable not set")
 	errUnsupportedType = errors.New("expandEnvInValue: unsupported type")
 )
 
@@ -96,7 +102,16 @@ func (c *Config) Backend(name string) (*Backend, error) {
 	}
 	b, ok := c.Backends[name]
 	if !ok {
-		return nil, fmt.Errorf("%w: %q", errBackendNotFound, name)
+		names := make([]string, 0, len(c.Backends))
+		for k := range c.Backends {
+			names = append(names, k)
+		}
+		err := coacherrors.Wrap(errBackendNotFound, coacherrors.KindUser,
+			fmt.Sprintf("backend %q not found in coach.json", name))
+		if len(names) > 0 {
+			err.Suggest = fmt.Sprintf("Available backends: %s", strings.Join(names, ", "))
+		}
+		return nil, err
 	}
 	return &b, nil
 }
@@ -111,7 +126,10 @@ func expandEnvString(s string) (string, error) {
 	name := s[1:]
 	val, ok := os.LookupEnv(name)
 	if !ok {
-		return "", fmt.Errorf("%w: %q", errEnvVarNotSet, name)
+		return "", coacherrors.WithHint(
+			fmt.Errorf("%w: %q", errEnvVarNotSet, name),
+			fmt.Sprintf("Export %s=... before running coach, or replace \"$%s\" with a literal value in coach.json", name, name),
+		)
 	}
 
 	return val, nil
@@ -178,7 +196,10 @@ func expandEnvInConfig(raw json.RawMessage) (json.RawMessage, error) {
 		name := string(match[2 : len(match)-1])
 		val, ok := os.LookupEnv(name)
 		if !ok {
-			expandErr = fmt.Errorf("%w: %q", errEnvVarNotSet, name)
+			expandErr = coacherrors.WithHint(
+				fmt.Errorf("%w: %q", errEnvVarNotSet, name),
+				fmt.Sprintf("Export %s=... before running coach, or replace \"$%s\" with a literal value in coach.json", name, name),
+			)
 			return match
 		}
 		b, _ := json.Marshal(val)

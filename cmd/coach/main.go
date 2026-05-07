@@ -13,6 +13,7 @@ import (
 	"github.com/tomr-ninja/flag3"
 
 	"github.com/tomr-ninja/coach"
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 	"github.com/tomr-ninja/coach/protocol"
 )
 
@@ -44,13 +45,15 @@ func main() {
 
 	cmd, err := flag3.ParseCLI(tree)
 	if err != nil {
-		fatal("invalid command: %v\ncommands: run, script, schedule", err)
+		handleError(coacherrors.New(coacherrors.KindUser,
+			fmt.Sprintf("invalid command: %v\ncommands: run, script, schedule", err)))
 	}
 
 	cmd.Next() // skip root (coach)
 
 	if !cmd.Next() {
-		fatal("usage: coach <command> [<args>]\ncommands: run, script, schedule")
+		handleError(coacherrors.New(coacherrors.KindUser,
+			"usage: coach <command> [<args>]\ncommands: run, script, schedule"))
 	}
 
 	switch cmd.Command() {
@@ -63,23 +66,24 @@ func main() {
 		runFlags.StringVar(&output, "output", "./output", "Path to the output folder")
 		runFlags.BoolVar(&force, "force", false, "Force re-creation of existing artifact")
 		if err := runFlags.Parse(cmd.Args()); err != nil {
-			fatal("error parsing flags: %v", err)
+			handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 		}
 
 		posArgs := runFlags.Args()
 		if len(posArgs) < 1 {
-			fatal("usage: coach run [-data <dir>] [-output <dir>] [-force] <model-image>")
+			handleError(coacherrors.New(coacherrors.KindUser,
+				"usage: coach run [-data <dir>] [-output <dir>] [-force] <model-image>"))
 		}
 		modelImage := posArgs[0]
 
 		if err := coach.ValidateModelImage(modelImage); err != nil {
-			fatal("invalid model image: %v", err)
+			handleError(err)
 		}
 		if err := coach.ValidateDataPath(data); err != nil {
-			fatal("invalid data path: %v", err)
+			handleError(err)
 		}
 		if err := coach.ValidateOutputDir(output); err != nil {
-			fatal("invalid output path: %v", err)
+			handleError(err)
 		}
 
 		ctx, cancel := signalContext()
@@ -87,23 +91,25 @@ func main() {
 
 		fingerprint, err := coach.Run(ctx, modelImage, data, output, force)
 		if err != nil {
-			fatal("error running coach: %v", err)
+			handleError(err)
 		}
 		fmt.Printf("%x\n", fingerprint)
 
 	case "script":
 		if !cmd.Next() {
-			fatal("usage: coach script <ls|run> [<args>]")
+			handleError(coacherrors.New(coacherrors.KindUser,
+				"usage: coach script <ls|run> [<args>]"))
 		}
 
 		switch cmd.Command() {
 		case "ls":
 			if len(cmd.Args()) < 1 {
-				fatal("usage: coach script ls <model-image>")
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach script ls <model-image>"))
 			}
 			modelImage := cmd.Args()[0]
 			if err := coach.ValidateModelImage(modelImage); err != nil {
-				fatal("invalid model image: %v", err)
+				handleError(err)
 			}
 
 			ctx, cancel := signalContext()
@@ -111,7 +117,7 @@ func main() {
 
 			scripts, err := coach.ListScripts(ctx, modelImage)
 			if err != nil {
-				fatal("error listing scripts: %v", err)
+				handleError(err)
 			}
 			for _, s := range scripts {
 				fmt.Println(s)
@@ -124,43 +130,46 @@ func main() {
 			scriptRunFlags.StringVar(&data, "data", "./data", "Path to the data folder")
 			scriptRunFlags.StringVar(&output, "output", "./output", "Path to the output folder")
 			if err := scriptRunFlags.Parse(cmd.Args()); err != nil {
-				fatal("error parsing flags: %v", err)
+				handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 			}
 
 			remaining := scriptRunFlags.Args()
 			if len(remaining) < 1 {
-				fatal("usage: coach script run [-data <dir>] [-output <dir>] <model-image> <script-name> [args...]")
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach script run [-data <dir>] [-output <dir>] <model-image> <script-name> [args...]"))
 			}
 			modelImage := remaining[0]
 
 			if len(remaining) < 2 {
-				fatal("usage: coach script run [-data <dir>] [-output <dir>] <model-image> <script-name> [args...]")
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach script run [-data <dir>] [-output <dir>] <model-image> <script-name> [args...]"))
 			}
 			scriptName := remaining[1]
 			scriptArgs := remaining[2:]
 
 			if err := coach.ValidateModelImage(modelImage); err != nil {
-				fatal("invalid model image: %v", err)
+				handleError(err)
 			}
 			if err := coach.ValidateScriptName(scriptName); err != nil {
-				fatal("invalid script name: %v", err)
+				handleError(err)
 			}
 			if err := coach.ValidateDataPath(data); err != nil {
-				fatal("invalid data path: %v", err)
+				handleError(err)
 			}
 			if err := coach.ValidateOutputDir(output); err != nil {
-				fatal("invalid output path: %v", err)
+				handleError(err)
 			}
 
 			ctx, cancel := signalContext()
 			defer cancel()
 
 			if err := coach.RunScript(ctx, modelImage, scriptName, scriptArgs, data, output); err != nil {
-				fatal("error running script: %v", err)
+				handleError(err)
 			}
 
 		default:
-			fatal("unknown script subcommand: %s\nusage: coach script <ls|run>", cmd.Command())
+			handleError(coacherrors.New(coacherrors.KindUser,
+				fmt.Sprintf("unknown script subcommand: %s\nusage: coach script <ls|run>", cmd.Command())))
 		}
 
 	case "schedule":
@@ -169,11 +178,12 @@ func main() {
 		schedFlags := flag.NewFlagSet("schedule", flag.ExitOnError)
 		schedFlags.StringVar(&backend, "backend", "", "Backend name from coach.json")
 		if err := schedFlags.Parse(cmd.Args()); err != nil {
-			fatal("error parsing flags: %v", err)
+			handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 		}
 
 		if !cmd.Next() {
-			fatal("usage: coach schedule [-backend <name>] <create|ls|delete|status> [<args>]")
+			handleError(coacherrors.New(coacherrors.KindUser,
+				"usage: coach schedule [-backend <name>] <create|ls|delete|status> [<args>]"))
 		}
 
 		switch cmd.Command() {
@@ -196,34 +206,35 @@ func main() {
 			createFlags.StringVar(&gpuType, "gpu-type", "", "GPU type")
 			createFlags.Var(&labels, "label", "Label key=value (repeatable)")
 			if err := createFlags.Parse(cmd.Args()); err != nil {
-				fatal("error parsing flags: %v", err)
+				handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 			}
 
 			posArgs := createFlags.Args()
 			if len(posArgs) < 1 {
-				fatal("usage: coach schedule [-backend <name>] create [flags] <model-image>")
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach schedule [-backend <name>] create [flags] <model-image>"))
 			}
 			modelImage := posArgs[0]
 
 			if dataSource == "" || outputURI == "" {
-				fatal("flags -data and -output are required")
+				handleError(coacherrors.New(coacherrors.KindUser, "flags -data and -output are required"))
 			}
 
 			if err := coach.ValidateModelImage(modelImage); err != nil {
-				fatal("invalid model image: %v", err)
+				handleError(err)
 			}
 			if err := coach.ValidateDataPath(dataSource); err != nil {
-				fatal("invalid data source: %v", err)
+				handleError(err)
 			}
 			if err := coach.ValidateOutputDir(outputURI); err != nil {
-				fatal("invalid output destination: %v", err)
+				handleError(err)
 			}
 			if err := coach.ValidateCron(sched); err != nil {
-				fatal("invalid schedule: %v", err)
+				handleError(err)
 			}
 			if script != "" {
 				if err := coach.ValidateScriptName(script); err != nil {
-					fatal("invalid script name: %v", err)
+					handleError(err)
 				}
 			}
 
@@ -231,49 +242,61 @@ func main() {
 			resources := protocol.ParseResources(cpu, memory, gpu, gpuType)
 			id, err := coach.ScheduleCreate(backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
 			if err != nil {
-				fatal("error: %v", err)
+				handleError(err)
 			}
 			fmt.Println(id)
 
 		case "ls":
 			entries, err := coach.ScheduleList(backend)
 			if err != nil {
-				fatal("error: %v", err)
+				handleError(err)
 			}
 			for _, e := range entries {
-				b, _ := json.Marshal(e)
+				b, err := json.Marshal(e)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: marshal schedule entry: %v\n", err)
+					continue
+				}
 				fmt.Println(string(b))
 			}
 
 		case "delete":
 			if len(cmd.Args()) < 1 {
-				fatal("usage: coach schedule [-backend <name>] delete <id>")
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach schedule [-backend <name>] delete <id>"))
 			}
 			id := cmd.Args()[0]
 			if err := coach.ScheduleDelete(backend, id); err != nil {
-				fatal("error: %v", err)
+				handleError(err)
 			}
 
 		case "status":
 			if len(cmd.Args()) < 1 {
-				fatal("usage: coach schedule [-backend <name>] status <id>")
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach schedule [-backend <name>] status <id>"))
 			}
 			id := cmd.Args()[0]
 			status, err := coach.ScheduleStatus(backend, id)
 			if err != nil {
-				fatal("error: %v", err)
+				handleError(err)
 			}
 			if status != nil {
-				b, _ := json.Marshal(status)
-				fmt.Println(string(b))
+				b, err := json.Marshal(status)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: marshal status: %v\n", err)
+				} else {
+					fmt.Println(string(b))
+				}
 			}
 
 		default:
-			fatal("unknown schedule subcommand: %s\nusage: coach schedule <create|ls|delete|status>", cmd.Command())
+			handleError(coacherrors.New(coacherrors.KindUser,
+				fmt.Sprintf("unknown schedule subcommand: %s\nusage: coach schedule <create|ls|delete|status>", cmd.Command())))
 		}
 
 	default:
-		fatal("unknown command: %s\ncommands: run, script, schedule", cmd.Command())
+		handleError(coacherrors.New(coacherrors.KindUser,
+			fmt.Sprintf("unknown command: %s\ncommands: run, script, schedule", cmd.Command())))
 	}
 }
 
@@ -298,7 +321,18 @@ func parseLabels(labels []string) map[string]string {
 	return m
 }
 
-func fatal(format string, args ...any) {
-	_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(1)
+func handleError(err error) {
+	kind := coacherrors.GetKind(err)
+	hint := coacherrors.GetHint(err)
+
+	fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+	if hint != "" {
+		fmt.Fprintf(os.Stderr, "Hint: %s\n", hint)
+	}
+
+	if os.Getenv("COACH_DEBUG") == "1" {
+		fmt.Fprintf(os.Stderr, "\n--- debug ---\n%s\n", coacherrors.DebugFormat(err))
+	}
+
+	os.Exit(coacherrors.ExitCode(kind))
 }

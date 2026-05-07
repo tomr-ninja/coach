@@ -14,11 +14,15 @@ import (
 	"strings"
 
 	"github.com/tomr-ninja/coach/docker"
+	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
 var (
-	zeroFingerprint    = [32]byte{}
-	errArtifactExists  = errors.New("artifact already exists")
+	zeroFingerprint   = [32]byte{}
+	errArtifactExists = coacherrors.WithHint(
+		coacherrors.New(coacherrors.KindUser, "artifact already exists"),
+		"Use --force to overwrite, or change the output path",
+	)
 	errArtifactEmpty   = errors.New("model ran but produced no output")
 	errArtifactMissing = errors.New("artifact directory was not created")
 )
