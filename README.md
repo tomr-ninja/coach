@@ -10,6 +10,22 @@ Your model may remain completely oblivious about any of that happening; your bac
 
 \* *Some backends, like Prefect, require a bit of setup just to enable running Docker containers.*
 
+## Command tree
+
+```
+coach
+├── run [-data] [-output] [-force] <model-image>
+├── script
+│   ├── ls <model-image>
+│   └── run [-data] [-output] <model-image> <script> [args...]
+└── schedule [-backend]
+    ├── create [-data] [-output] [-schedule] [-command]... [-script]
+    │          [-cpu] [-memory] [-gpu] [-gpu-type] [-label]... <model-image>
+    ├── ls
+    ├── delete <id>
+    └── status <id>
+```
+
 ## Definitions
 
 ### Model
@@ -19,8 +35,8 @@ It is **not** a daemon and must eventually finish; if it finished with a zero ex
 
 Image's digest serves as a unique fingerprint of the model version.
 
-Optional: a model may also have /scripts folder. `coach list-scripts <model-image>` command will list all scripts in
-that folder. You can run any of those scripts with `coach run-script <model-image> <script-name> [args...]` command.
+Optional: a model may also have /scripts folder. `coach script ls <model-image>` lists all scripts in
+that folder. You can run any of those scripts with `coach script run <model-image> <script-name> [args...]`.
 Scripts are expected to be valid entrypoints, so they must be executable from inside the container.
 
 Useful examples of scripts may be 'fetch-data', 'convert-artifact', 'evaluate', etc., but it's not specified.
@@ -42,15 +58,15 @@ So from the model's perspective, you simply write to `/output`; coach handles th
 ## Local usage
 
 ```shell
-coach run --model <model-image> [--data <data-folder>] [--output <output-folder>] [--force]
+coach run [-data <data-folder>] [-output <output-folder>] [-force] <model-image>
 ```
 
-`--data` and `--output` default to `./data` and `./output` if omitted.
+`-data` and `-output` default to `./data` and `./output` if omitted. `<model-image>` is required.
 
-You can also pass S3 URIs for `--data` and `--output` to run locally with S3-backed data:
+You can also pass S3 URIs for `-data` and `-output` to run locally with S3-backed data:
 
 ```shell
-coach run --model my-model:v1 --data s3://my-bucket/training-data/ --output s3://my-bucket/output/
+coach run --data s3://my-bucket/training-data/ --output s3://my-bucket/output/ my-model:v1
 ```
 
 When S3 URIs are used, Coach builds and runs a wrapper container (same as described
@@ -111,9 +127,7 @@ All values starting with `$` (like `$S3_ACCESS_KEY_ID`) are expanded from enviro
 **Create a scheduled or one-off run:**
 
 ```shell
-coach schedule create \
-  --backend prefect \
-  --model my-model:v1 \
+coach schedule --backend prefect create \
   --data s3://my-bucket/training-data/ \
   --output s3://my-bucket/output/ \
   --schedule "0 */6 * * *" \
@@ -121,18 +135,20 @@ coach schedule create \
   --memory 16Gi \
   --gpu 1 \
   --gpu-type T4 \
-  --label env=prod
+  --label env=prod \
+  my-model:v1
 ```
 
-Omit `--schedule` for a one-off run. `--data` accepts a single source (local path or `s3://` URI).
+`-backend` goes on the `schedule` command itself, before the subcommand. Omit `-schedule` for a one-off run.
+`-data` accepts a single source (local path or `s3://` URI).
 Data source and output must either both be local or both be S3 — mixing is not allowed.
-`--script` runs a named script from `/scripts/` in the container; `--command` passes additional command args
-(e.g. `--command python --command -u --command train.py`).
+`-script` runs a named script from `/scripts/` in the container; `-command` passes additional command args
+(e.g. `-command python -command -u -command train.py`). The model image is a positional argument.
 
 **List scheduled runs:**
 
 ```shell
-coach schedule list --backend prefect
+coach schedule --backend prefect ls
 ```
 
 Output is NDJSON (one JSON object per line).
@@ -140,13 +156,13 @@ Output is NDJSON (one JSON object per line).
 **Check run status:**
 
 ```shell
-coach schedule status <run-id> --backend prefect
+coach schedule --backend prefect status <run-id>
 ```
 
 **Delete a scheduled run:**
 
 ```shell
-coach schedule delete <run-id> --backend prefect
+coach schedule --backend prefect delete <run-id>
 ```
 
 ### Container bridge — how S3 wrapping works
@@ -204,12 +220,11 @@ With this `coach.json`:
 ```
 
 ```shell
-coach schedule create \
-  --backend prefect \
-  --model my-model:v1 \
+coach schedule --backend prefect create \
   --data s3://my-bucket/training-data/ \
   --output s3://my-bucket/output/ \
-  --cpu 4 --memory 16Gi
+  --cpu 4 --memory 16Gi \
+  my-model:v1
 ```
 
 Coach will build and push `docker.io/myorg/coach-wrapped-my-model-v1:abc123def456` before submitting the job.
