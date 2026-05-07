@@ -55,7 +55,7 @@ func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool)
 	return RunLocal(ctx, modelImage, dataDir, outputDir, force)
 }
 
-func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
+func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force bool) (fp [32]byte, runErr error) {
 	if err := ValidateModelImage(modelImage); err != nil {
 		return zeroFingerprint, fmt.Errorf("validate model image: %w", err)
 	}
@@ -81,6 +81,18 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 	if err != nil {
 		return zeroFingerprint, err
 	}
+
+	// Clean up empty artifact directory if the run fails.
+	defer func() {
+		if runErr == nil {
+			return
+		}
+		entries, readErr := os.ReadDir(artifactsDir)
+		if readErr != nil || len(entries) > 0 {
+			return
+		}
+		_ = os.Remove(artifactsDir)
+	}()
 
 	if err := client.Run(ctx, modelImage, dataDir, artifactsDir); err != nil {
 		return zeroFingerprint, fmt.Errorf("run model: %w", err)

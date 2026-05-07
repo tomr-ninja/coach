@@ -2,6 +2,7 @@ package docker
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -26,6 +27,7 @@ import (
 var (
 	errNoDigest      = errors.New("no digest found for image")
 	errContainerExit = coacherrors.New(coacherrors.KindIO, "container exited with non-zero code")
+	errDockerStream  = errors.New("docker stream contains error")
 )
 
 type Client struct {
@@ -90,8 +92,8 @@ func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag str
 		return fmt.Errorf("build image %s: %w", tag, err)
 	}
 	defer resp.Body.Close()
-	if _, err := io.Copy(os.Stderr, resp.Body); err != nil {
-		return fmt.Errorf("read build output: %w", err)
+	if streamErr := parseDockerStream(resp.Body, os.Stderr); streamErr != nil {
+		return fmt.Errorf("build image %s: %w", tag, streamErr)
 	}
 	return nil
 }
@@ -105,8 +107,8 @@ func (c *Client) ImagePush(ctx context.Context, tag, auth string) error {
 		return fmt.Errorf("push image %s: %w", tag, err)
 	}
 	defer resp.Close()
-	if _, err := io.Copy(os.Stderr, resp); err != nil {
-		return fmt.Errorf("read push output: %w", err)
+	if streamErr := parseDockerStream(resp, os.Stderr); streamErr != nil {
+		return fmt.Errorf("push image %s: %w", tag, streamErr)
 	}
 	return nil
 }
@@ -489,6 +491,70 @@ func (c *Client) RunScript(ctx context.Context, imageName string, script string,
 			}
 			return fmt.Errorf("%w: %d", errContainerExit, status.StatusCode)
 		}
+	}
+
+	return nil
+}
+
+// parseDockerStream reads a Docker daemon JSON stream (build or push),
+// copies informational output to w, and returns any embedded error found.
+func parseDockerStream(r io.Reader, w io.Writer) error {
+	var collected []string
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			// Non-JSON lines (e.g. raw output from old Docker versions) pass through.
+			fmt.Fprintln(w, string(line))
+			continue
+		}
+
+		if errRaw, ok := msg["error"]; ok {
+			var errStr string
+			if json.Unmarshal(errRaw, &errStr) == nil && errStr != "" {
+				collected = append(collected, errStr)
+			} else {
+				collected = append(collected, string(errRaw))
+			}
+		}
+		if detailRaw, ok := msg["errorDetail"]; ok {
+			var detail struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(detailRaw, &detail) == nil && detail.Message != "" {
+				collected = append(collected, fmt.Sprintf("[code %d] %s", detail.Code, detail.Message))
+			}
+		}
+
+		// Echo stream/status/id/progress to output.
+		for _, key := range []string{"stream", "status", "id", "progress", "progressDetail", "aux"} {
+			if v, ok := msg[key]; ok {
+				var s string
+				if json.Unmarshal(v, &s) == nil {
+					fmt.Fprint(w, s)
+				} else {
+					fmt.Fprintln(w, string(v))
+				}
+				break
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		if len(collected) > 0 {
+			return fmt.Errorf("%s (scan error: %w)", strings.Join(collected, "; "), err)
+		}
+		return fmt.Errorf("read docker stream: %w", err)
+	}
+
+	if len(collected) > 0 {
+		return fmt.Errorf("%w: %s", errDockerStream, strings.Join(collected, "; "))
 	}
 
 	return nil
