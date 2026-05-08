@@ -69,70 +69,24 @@ func ScheduleCreate(
 	}
 	defer client.Close()
 
-	exists, err := client.ImageExists(ctx, modelImage)
+	fingerprint, err := resolveScheduleFingerprint(ctx, client, modelImage, dataSource, cfg)
 	if err != nil {
-		return "", fmt.Errorf("check image exists: %w", err)
+		return "", err
 	}
-	if !exists {
-		return "", fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
-	}
-
-	digest, err := client.EnsureImageDigest(ctx, modelImage)
-	if err != nil {
-		return "", fmt.Errorf("image digest: %w", err)
-	}
-
-	checksums, err := ResolveChecksums(dataSource, cfg)
-	if err != nil {
-		return "", fmt.Errorf("resolve checksums: %w", err)
-	}
-
-	fingerprint := artifactFingerprint(digest, checksums)
 	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 
-	wrapped := strings.HasPrefix(dataSource, "s3://")
-	if wrapped && !strings.HasPrefix(outputURI, "s3://") {
-		return "", fmt.Errorf("%w: s3 data source requires s3 output destination", errMixedLocalS3)
-	}
-	if !wrapped && strings.HasPrefix(outputURI, "s3://") {
-		return "", fmt.Errorf("%w: local data source requires local output destination", errMixedLocalS3)
+	if err := validateLocalVsS3(dataSource, outputURI); err != nil {
+		return "", err
 	}
 
+	wrapped := strings.HasPrefix(dataSource, "s3://")
 	var model protocol.Model
 	var wrappedImage string
-	var wrapErr error
 
 	if wrapped {
-		if cfg.Registry == "" {
-			return "", fmt.Errorf("%w", errNoRegistry)
-		}
-
-		s3PathIn := strings.TrimPrefix(dataSource, "s3://")
-		s3PathOut := strings.TrimPrefix(outputURI, "s3://")
-		if !strings.HasSuffix(s3PathOut, "/") {
-			s3PathOut += "/"
-		}
-		s3PathOut += fingerprintHex
-
-		envVars := buildS3EnvVars(cfg.S3)
-		envVars["S3_PATH_IN"] = s3PathIn
-		envVars["S3_PATH_OUT"] = s3PathOut
-
-		entrypoint, _, entryErr := client.ImageEntrypoint(ctx, modelImage)
-		if entryErr != nil {
-			return "", fmt.Errorf("inspect image entrypoint: %w", entryErr)
-		}
-
-		wrappedImage, wrapErr = WrapImage(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth.Reveal(), entrypoint)
-		if wrapErr != nil {
-			return "", fmt.Errorf("wrap image: %w", wrapErr)
-		}
-
-		model = protocol.Model{
-			Image:   wrappedImage,
-			Command: command,
-			Script:  script,
-			EnvVars: envVars,
+		model, wrappedImage, err = wrapModelForS3(ctx, client, modelImage, fingerprintHex, dataSource, outputURI, cfg, command, script)
+		if err != nil {
+			return "", err
 		}
 	} else {
 		model = protocol.Model{
@@ -142,28 +96,17 @@ func ScheduleCreate(
 		}
 	}
 
-	name := fmt.Sprintf("coach-container-runner-%s", sanitizeImageName(modelImage))
-	job := &protocol.Job{
-		Fingerprint: fingerprintHex,
-		Name:        name,
-		IsRecurring: scheduleCron != "",
-		IsWrapped:   wrapped,
-		Model:       model,
-		Data: protocol.Data{
-			Sources:   []string{dataSource},
-			MountPath: "/data",
-		},
-		Output: protocol.Output{
-			Destination: outputURI,
-			MountPath:   "/output",
-		},
-		Resources: resources,
-		Labels:    labels,
-	}
-
-	if scheduleCron != "" {
-		job.Schedule = &protocol.Schedule{Cron: scheduleCron, Timezone: "UTC"}
-	}
+	job := buildScheduleJob(buildScheduleJobParams{
+		Fingerprint:  fingerprintHex,
+		ModelImage:   modelImage,
+		DataSource:   dataSource,
+		OutputURI:    outputURI,
+		ScheduleCron: scheduleCron,
+		Wrapped:      wrapped,
+		Model:        model,
+		Resources:    resources,
+		Labels:       labels,
+	})
 
 	spec := &protocol.Spec{
 		ProtocolVersion: protocol.Version,
@@ -188,6 +131,122 @@ func ScheduleCreate(
 	}
 
 	return result.SubmitResult.ID, nil
+}
+
+// resolveScheduleFingerprint checks the image exists locally, resolves its digest
+// and data checksums, then computes the combined artifact fingerprint.
+func resolveScheduleFingerprint(ctx context.Context, client *docker.Client, modelImage, dataSource string, cfg *Config) ([32]byte, error) {
+	exists, err := client.ImageExists(ctx, modelImage)
+	if err != nil {
+		return zeroFingerprint, fmt.Errorf("check image exists: %w", err)
+	}
+	if !exists {
+		return zeroFingerprint, fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
+	}
+
+	digest, err := client.EnsureImageDigest(ctx, modelImage)
+	if err != nil {
+		return zeroFingerprint, fmt.Errorf("image digest: %w", err)
+	}
+
+	checksums, err := ResolveChecksums(dataSource, cfg)
+	if err != nil {
+		return zeroFingerprint, fmt.Errorf("resolve checksums: %w", err)
+	}
+
+	return artifactFingerprint(digest, checksums), nil
+}
+
+// validateLocalVsS3 ensures data source and output are either both local or both S3.
+func validateLocalVsS3(dataSource, outputURI string) error {
+	dataIsS3 := strings.HasPrefix(dataSource, "s3://")
+	outputIsS3 := strings.HasPrefix(outputURI, "s3://")
+	if dataIsS3 != outputIsS3 {
+		return fmt.Errorf("%w", errMixedLocalS3)
+	}
+	return nil
+}
+
+// wrapModelForS3 builds an S3 wrapper image and returns the wrapped Model plus the image tag.
+func wrapModelForS3(
+	ctx context.Context,
+	client *docker.Client,
+	modelImage, fingerprintHex, dataSource, outputURI string,
+	cfg *Config,
+	command []string,
+	script string,
+) (protocol.Model, string, error) {
+	if cfg.Registry == "" {
+		return protocol.Model{}, "", fmt.Errorf("%w", errNoRegistry)
+	}
+
+	s3PathIn := strings.TrimPrefix(dataSource, "s3://")
+	s3PathOut := strings.TrimPrefix(outputURI, "s3://")
+	if !strings.HasSuffix(s3PathOut, "/") {
+		s3PathOut += "/"
+	}
+	s3PathOut += fingerprintHex
+
+	envVars := buildS3ContainerEnv(cfg, s3PathIn, s3PathOut)
+
+	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
+	if err != nil {
+		return protocol.Model{}, "", fmt.Errorf("inspect image entrypoint: %w", err)
+	}
+
+	wrappedImage, err := WrapImage(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth.Reveal(), entrypoint)
+	if err != nil {
+		return protocol.Model{}, "", fmt.Errorf("wrap image: %w", err)
+	}
+
+	model := protocol.Model{
+		Image:   wrappedImage,
+		Command: command,
+		Script:  script,
+		EnvVars: envVars,
+	}
+
+	return model, wrappedImage, nil
+}
+
+type buildScheduleJobParams struct {
+	Fingerprint  string
+	ModelImage   string
+	DataSource   string
+	OutputURI    string
+	ScheduleCron string
+	Wrapped      bool
+	Model        protocol.Model
+	Resources    protocol.Resources
+	Labels       map[string]string
+}
+
+// buildScheduleJob assembles a protocol.Job from its parts.
+func buildScheduleJob(p buildScheduleJobParams) *protocol.Job {
+	name := fmt.Sprintf("coach-container-runner-%s", sanitizeImageName(p.ModelImage))
+	job := &protocol.Job{
+		Fingerprint: p.Fingerprint,
+		Name:        name,
+		IsRecurring: p.ScheduleCron != "",
+		IsWrapped:   p.Wrapped,
+		Model:       p.Model,
+		Data: protocol.Data{
+			Sources:   []string{p.DataSource},
+			MountPath: "/data",
+		},
+		Output: protocol.Output{
+			Destination: p.OutputURI,
+			MountPath:   "/output",
+		},
+		Resources: p.Resources,
+		Labels:    p.Labels,
+	}
+
+	if p.ScheduleCron != "" {
+		job.Schedule = &protocol.Schedule{Cron: p.ScheduleCron, Timezone: "UTC"}
+	}
+
+	return job
 }
 
 func ScheduleList(ctx context.Context, backendName string) ([]protocol.ScheduleEntry, error) {
