@@ -16,7 +16,7 @@ import (
 
 // setupCleanupTest builds a Docker image tagged with the coach-wrapped- prefix
 // and returns the tag. The caller is responsible for cleanup.
-func setupCleanupTest(t *testing.T) (string, func()) {
+func setupCleanupTest(t *testing.T) (tag string, cleanup func()) {
 	t.Helper()
 
 	client, err := docker.NewRealDockerClient()
@@ -37,12 +37,12 @@ RUN echo "cleanup test %s" > /test.txt
 	buildCtx, err := docker.BuildContextDir(tmpDir)
 	require.NoError(t, err)
 
-	tag := fmt.Sprintf("coach-wrapped-test-cleanup-%x:latest", time.Now().UnixNano())
+	tag = fmt.Sprintf("coach-wrapped-test-cleanup-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
 	err = client.ImageBuild(ctx, buildCtx, tag)
 	require.NoError(t, err, "build should succeed")
 
-	cleanup := func() {
+	cleanup = func() {
 		os.RemoveAll(tmpDir)
 		// Best-effort cleanup in case the test didn't remove it
 		_ = client.ImageRemove(context.Background(), tag, true)

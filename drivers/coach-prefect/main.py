@@ -8,6 +8,8 @@ import traceback
 
 PROTOCOL_VERSION = 1
 
+VERBOSE = os.environ.get("COACH_VERBOSE") == "1"
+
 config_raw = os.environ.get("COACH_BACKEND_CONFIG", "{}")
 config = json.loads(config_raw)
 
@@ -148,11 +150,17 @@ def run():
     except json.JSONDecodeError as e:
         write_result({"success": False, "error": f"invalid input json: {e}"})
 
+    if VERBOSE:
+        print(f"[prefect driver] spec: {json.dumps(spec)}", file=sys.stderr)
     spec_type = spec.get("type")
     job = spec.get("job", {})
     run_id = spec.get("id")
 
     async def execute():
+        import time as _time
+        _start = _time.monotonic()
+        if VERBOSE:
+            print(f"[prefect driver] executing {spec_type}...", file=sys.stderr)
         async with get_client() as client:
             if spec_type == "submit":
                 sid = await submit_job(client, job)
@@ -171,6 +179,9 @@ def run():
 
     try:
         result = asyncio.run(execute())
+        if VERBOSE:
+            elapsed = time.monotonic() - _start
+            print(f"[prefect driver] {spec_type} completed in {elapsed:.2f}s", file=sys.stderr)
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
         result = {"success": False, "error": str(e)}

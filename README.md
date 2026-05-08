@@ -13,7 +13,8 @@ Your model may remain completely oblivious about any of that happening; your bac
 ## Command tree
 
 ```
-coach
+coach [--verbose]
+├── cleanup [-dry-run] [-older <duration>]
 ├── run [-data] [-output] [-force] <model-image>
 ├── script
 │   ├── ls <model-image>
@@ -57,6 +58,8 @@ So from the model's perspective, you simply write to `/output`; coach handles th
 
 ## Local usage
 
+### Running a model
+
 ```shell
 coach run [-data <data-folder>] [-output <output-folder>] [-force] <model-image>
 ```
@@ -72,6 +75,25 @@ coach run --data s3://my-bucket/training-data/ --output s3://my-bucket/output/ m
 When S3 URIs are used, Coach builds and runs a wrapper container (same as described
 in the [Container bridge](#container-bridge--how-s3-wrapping-works) section), pulling data from S3 before training
 and pushing results back after.
+
+### Cleanup
+
+Coach builds wrapper Docker images for S3-backed runs. Over time these accumulate and consume
+disk space. `coach cleanup` removes stale wrapper images.
+
+```shell
+coach cleanup [-dry-run] [-older <duration>]
+```
+
+- `-dry-run` — Print what would be removed without actually deleting.
+- `-older` — Only remove images older than the given duration (default: `24h`). Accepts Go-style
+duration strings: `24h`, `7d`, `30m`, etc. Set to `0` to remove all wrapper images regardless of age.
+
+Example:
+
+```shell
+coach cleanup --older 7d
+```
 
 ## Scheduling on remote backends
 
@@ -296,10 +318,11 @@ driver — same behavior as before.
 ### Drivers
 
 Drivers are external executables that translate a standard JSON job spec into backend-specific API calls.
-Drivers can be written in any language. Two reference implementations are included:
+Drivers can be written in any language. Three reference implementations are included:
 
 - `drivers/coach-prefect/` — Python driver for Prefect
 - `drivers/coach-scaleway/` — Go driver for Scaleway Serverless Jobs
+- `drivers/coach-nebius/` — Go driver for Nebius Cloud
 
 The full driver protocol specification, including the JSON contract, exit code rules, and operation examples, is
 in **[protocol/README.md](protocol/README.md)**.

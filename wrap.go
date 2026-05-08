@@ -79,11 +79,17 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 		return "", fmt.Errorf("build context: %w", ctxErr)
 	}
 
+	if IsVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "building wrapper image %s...\n", tag)
+	}
 	if err := dc.ImageBuild(ctx, buildCtx, tag); err != nil {
 		return "", fmt.Errorf("build image: %w", err)
 	}
 
 	if registry != "" {
+		if IsVerbose(ctx) {
+			fmt.Fprintf(os.Stderr, "pushing wrapper image %s...\n", tag)
+		}
 		if err := dc.ImagePush(ctx, tag, registryAuth); err != nil {
 			return "", fmt.Errorf("push image: %w", err)
 		}

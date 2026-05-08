@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/tomr-ninja/coach/docker"
@@ -20,6 +21,7 @@ var (
 )
 
 func ScheduleCreate(
+	ctx context.Context,
 	backendName, modelImage, dataSource, outputURI, scheduleCron string,
 	command []string,
 	script string,
@@ -64,7 +66,7 @@ func ScheduleCreate(
 	}
 	defer client.Close()
 
-	exists, err := client.ImageExists(context.Background(), modelImage)
+	exists, err := client.ImageExists(ctx, modelImage)
 	if err != nil {
 		return "", fmt.Errorf("check image exists: %w", err)
 	}
@@ -72,7 +74,7 @@ func ScheduleCreate(
 		return "", fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
 	}
 
-	digest, err := client.ImageDigest(context.Background(), modelImage)
+	digest, err := client.ImageDigest(ctx, modelImage)
 	if err != nil {
 		return "", fmt.Errorf("image digest: %w", err)
 	}
@@ -94,6 +96,8 @@ func ScheduleCreate(
 	}
 
 	var model protocol.Model
+	var wrappedImage string
+	var wrapErr error
 
 	if wrapped {
 		if cfg.Registry == "" {
@@ -111,12 +115,12 @@ func ScheduleCreate(
 		envVars["S3_PATH_IN"] = s3PathIn
 		envVars["S3_PATH_OUT"] = s3PathOut
 
-		entrypoint, _, entryErr := client.ImageEntrypoint(context.Background(), modelImage)
+		entrypoint, _, entryErr := client.ImageEntrypoint(ctx, modelImage)
 		if entryErr != nil {
 			return "", fmt.Errorf("inspect image entrypoint: %w", entryErr)
 		}
 
-		wrappedImage, wrapErr := WrapImage(context.Background(), client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth, entrypoint)
+		wrappedImage, wrapErr = WrapImage(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth, entrypoint)
 		if wrapErr != nil {
 			return "", fmt.Errorf("wrap image: %w", wrapErr)
 		}
@@ -163,8 +167,13 @@ func ScheduleCreate(
 		Type:            "submit",
 		Job:             job,
 	}
-	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
+	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config)
 	if err != nil {
+		if wrappedImage != "" {
+			if rmErr := client.ImageRemove(context.Background(), wrappedImage, true); rmErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: cleanup wrapper image %s: %v\n", wrappedImage, rmErr)
+			}
+		}
 		return "", fmt.Errorf("invoke driver: %w", err)
 	}
 
@@ -175,7 +184,7 @@ func ScheduleCreate(
 	return result.SubmitResult.ID, nil
 }
 
-func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
+func ScheduleList(ctx context.Context, backendName string) ([]protocol.ScheduleEntry, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -190,7 +199,7 @@ func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
 		ProtocolVersion: protocol.Version,
 		Type:            "list",
 	}
-	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
+	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config)
 	if err != nil {
 		return nil, fmt.Errorf("invoke driver: %w", err)
 	}
@@ -202,7 +211,7 @@ func ScheduleList(backendName string) ([]protocol.ScheduleEntry, error) {
 	return result.ListResult.Entries, nil
 }
 
-func ScheduleDelete(backendName, id string) error {
+func ScheduleDelete(ctx context.Context, backendName, id string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -218,14 +227,14 @@ func ScheduleDelete(backendName, id string) error {
 		Type:            "delete",
 		ID:              id,
 	}
-	if _, err := InvokeDriver(backend.Driver, spec, backend.Config); err != nil {
+	if _, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config); err != nil {
 		return fmt.Errorf("invoke driver: %w", err)
 	}
 
 	return nil
 }
 
-func ScheduleStatus(backendName, id string) (*protocol.StatusResult, error) {
+func ScheduleStatus(ctx context.Context, backendName, id string) (*protocol.StatusResult, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
@@ -241,7 +250,7 @@ func ScheduleStatus(backendName, id string) (*protocol.StatusResult, error) {
 		Type:            "status",
 		ID:              id,
 	}
-	result, err := InvokeDriver(backend.Driver, spec, backend.Config)
+	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config)
 	if err != nil {
 		return nil, fmt.Errorf("invoke driver: %w", err)
 	}

@@ -27,6 +27,9 @@ func Cleanup(ctx context.Context, maxAge time.Duration, dryRun bool) (*CleanupRe
 	}
 	defer client.Close()
 
+	if IsVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "listing wrapper images...\n")
+	}
 	images, err := client.ImageList(ctx, wrapperImagePrefix+"*")
 	if err != nil {
 		return nil, fmt.Errorf("list wrapper images: %w", err)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"time"
@@ -57,8 +58,11 @@ func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *proto
 	}
 
 	cmd := exec.CommandContext(ctx, driverPath)
-	cmd.Stdin = bytes.NewReader(specJSON)
+	cmd.Stdin = io.LimitReader(bytes.NewReader(specJSON), maxDriverOutput)
 	cmd.Env = append(os.Environ(), "COACH_BACKEND_CONFIG="+string(backendConfig))
+	if IsVerbose(ctx) {
+		cmd.Env = append(cmd.Env, "COACH_VERBOSE=1")
+	}
 
 	var stdout, stderr limitedBuffer
 	cmd.Stdout = &stdout

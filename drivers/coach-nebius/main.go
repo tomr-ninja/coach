@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/tomr-ninja/coach/protocol"
 )
@@ -29,7 +30,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	input, err := io.ReadAll(os.Stdin)
+	input, err := io.ReadAll(io.LimitReader(os.Stdin, 10*1024*1024))
 	if err != nil {
 		writeResult(&protocol.DriverResult{Success: false, Error: "read stdin: " + err.Error()})
 		os.Exit(0)
@@ -49,7 +50,13 @@ func main() {
 	}
 	defer api.Close()
 
+	verbose := os.Getenv("COACH_VERBOSE") == "1"
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[nebius driver] spec type=%s project=%s\n", spec.Type, cfg.ProjectID)
+	}
+
 	var result *protocol.DriverResult
+	start := time.Now()
 
 	switch spec.Type {
 	case "submit":
@@ -62,6 +69,10 @@ func main() {
 		result = statusResult(ctx, api, spec.ID)
 	default:
 		result = &protocol.DriverResult{Success: false, Error: fmt.Sprintf("unknown type: %s", spec.Type)}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[nebius driver] %s completed in %v\n", spec.Type, time.Since(start))
 	}
 
 	writeResult(result)

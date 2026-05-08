@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -644,7 +645,6 @@ func TestImageRemove(t *testing.T) {
 	assert.False(t, exists, "image should not exist after removal")
 
 }
-
 func TestImageRemove_Nonexistent(t *testing.T) {
 	_, client := setupDockerPool(t)
 	ctx := context.Background()
@@ -696,11 +696,9 @@ RUN echo "wrapped test" > /test.txt
 
 	found := false
 	for _, img := range images {
-		for _, repoTag := range img.RepoTags {
-			if repoTag == tag {
-				found = true
-				break
-			}
+		if slices.Contains(img.RepoTags, tag) {
+			found = true
+			break
 		}
 	}
 	assert.True(t, found, "should find image with coach-wrapped- prefix")

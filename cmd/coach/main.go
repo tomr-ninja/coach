@@ -33,25 +33,35 @@ func signalContext() (context.Context, context.CancelFunc) {
 }
 
 func main() {
-	tree := flag3.NewCLI()
-	tree.Subcommand("run")
-	script := tree.Subcommand("script")
-	script.Subcommand("ls")
-	script.Subcommand("run")
-	schedule := tree.Subcommand("schedule")
+	root := flag3.NewCLI()
+	root.Subcommand("cleanup")
+	root.Subcommand("run")
+
+	schedule := root.Subcommand("schedule")
 	schedule.Subcommand("create")
 	schedule.Subcommand("ls")
 	schedule.Subcommand("delete")
 	schedule.Subcommand("status")
-	tree.Subcommand("cleanup")
 
-	cmd, err := flag3.ParseCLI(tree)
+	script := root.Subcommand("script")
+	script.Subcommand("ls")
+	script.Subcommand("run")
+
+	cmd, err := flag3.ParseCLI(root)
 	if err != nil {
 		handleError(coacherrors.New(coacherrors.KindUser,
 			fmt.Sprintf("invalid command: %v\ncommands: run, script, schedule, cleanup", err)))
 	}
 
-	cmd.Next() // skip root (coach)
+	cmd.Next() // go into root
+
+	var verbose bool
+
+	rootFlags := flag.NewFlagSet("coach", flag.ExitOnError)
+	rootFlags.BoolVar(&verbose, "verbose", false, "Enable verbose output")
+	if err := rootFlags.Parse(cmd.Args()); err != nil {
+		handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
+	}
 
 	if !cmd.Next() {
 		handleError(coacherrors.New(coacherrors.KindUser,
@@ -90,6 +100,9 @@ func main() {
 
 		ctx, cancel := signalContext()
 		defer cancel()
+		if verbose {
+			ctx = coach.WithVerbose(ctx)
+		}
 
 		fingerprint, err := coach.Run(ctx, modelImage, data, output, force)
 		if err != nil {
@@ -116,6 +129,9 @@ func main() {
 
 			ctx, cancel := signalContext()
 			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
 
 			scripts, err := coach.ListScripts(ctx, modelImage)
 			if err != nil {
@@ -164,6 +180,9 @@ func main() {
 
 			ctx, cancel := signalContext()
 			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
 
 			if err := coach.RunScript(ctx, modelImage, scriptName, scriptArgs, data, output); err != nil {
 				handleError(err)
@@ -242,14 +261,24 @@ func main() {
 
 			labelMap := parseLabels(labels)
 			resources := protocol.ParseResources(cpu, memory, gpu, gpuType)
-			id, err := coach.ScheduleCreate(backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
+			ctx, cancel := signalContext()
+			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
+			id, err := coach.ScheduleCreate(ctx, backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
 			if err != nil {
 				handleError(err)
 			}
 			fmt.Println(id)
 
 		case "ls":
-			entries, err := coach.ScheduleList(backend)
+			ctx, cancel := signalContext()
+			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
+			entries, err := coach.ScheduleList(ctx, backend)
 			if err != nil {
 				handleError(err)
 			}
@@ -268,7 +297,12 @@ func main() {
 					"usage: coach schedule [-backend <name>] delete <id>"))
 			}
 			id := cmd.Args()[0]
-			if err := coach.ScheduleDelete(backend, id); err != nil {
+			ctx, cancel := signalContext()
+			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
+			if err := coach.ScheduleDelete(ctx, backend, id); err != nil {
 				handleError(err)
 			}
 
@@ -278,7 +312,12 @@ func main() {
 					"usage: coach schedule [-backend <name>] status <id>"))
 			}
 			id := cmd.Args()[0]
-			status, err := coach.ScheduleStatus(backend, id)
+			ctx, cancel := signalContext()
+			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
+			status, err := coach.ScheduleStatus(ctx, backend, id)
 			if err != nil {
 				handleError(err)
 			}
@@ -321,6 +360,9 @@ func main() {
 
 		ctx, cancel := signalContext()
 		defer cancel()
+		if verbose {
+			ctx = coach.WithVerbose(ctx)
+		}
 
 		result, err := coach.Cleanup(ctx, maxAge, dryRun)
 		if err != nil {

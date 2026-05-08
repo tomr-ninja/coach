@@ -25,6 +25,21 @@ import (
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
+type ctxKey string
+
+const verboseKey ctxKey = "docker-verbose"
+
+// WithVerbose returns a context marked as verbose for Docker operations.
+func WithVerbose(ctx context.Context) context.Context {
+	return context.WithValue(ctx, verboseKey, true)
+}
+
+// IsVerbose reports whether the context has verbose mode enabled.
+func isVerbose(ctx context.Context) bool {
+	v, _ := ctx.Value(verboseKey).(bool)
+	return v
+}
+
 var (
 	errNoDigest      = errors.New("no digest found for image")
 	errContainerExit = coacherrors.New(coacherrors.KindIO, "container exited with non-zero code")
@@ -84,9 +99,10 @@ func (c *Client) ImageDigest(ctx context.Context, imageName string) ([32]byte, e
 }
 
 func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag string) error {
+	suppress := !isVerbose(ctx)
 	resp, err := c.internal.ImageBuild(ctx, buildContext, client.ImageBuildOptions{
 		Tags:           []string{tag},
-		SuppressOutput: true,
+		SuppressOutput: suppress,
 		Remove:         true,
 	})
 	if err != nil {
@@ -257,9 +273,15 @@ func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) 
 		return fmt.Errorf("create container: %w", err)
 	}
 	defer func() {
+		if isVerbose(ctx) {
+			fmt.Fprintf(os.Stderr, "removing container %s\n", resp.ID[:12])
+		}
 		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
 	}()
 
+	if isVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "starting container %s (%s)\n", resp.ID[:12], imageName)
+	}
 	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start container: %w", err)
 	}
@@ -314,9 +336,15 @@ func (c *Client) RunWrapped(ctx context.Context, imageName string, envVars map[s
 		return fmt.Errorf("create container: %w", err)
 	}
 	defer func() {
+		if isVerbose(ctx) {
+			fmt.Fprintf(os.Stderr, "removing container %s\n", resp.ID[:12])
+		}
 		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
 	}()
 
+	if isVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "starting container %s (%s)\n", resp.ID[:12], imageName)
+	}
 	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return fmt.Errorf("start container: %w", err)
 	}

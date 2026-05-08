@@ -16,9 +16,10 @@ Coach invokes the driver as a subprocess:
 
 1. Writes the JSON spec to the driver's **stdin**
 2. Sets `COACH_BACKEND_CONFIG` environment variable with the backend's `config` block from `coach.json`
-3. Waits for the driver to exit (timeout: 5 minutes)
-4. Reads the JSON result from the driver's **stdout** (max 10 MB)
-5. Captures **stderr** and displays it on failure
+3. Optionally sets `COACH_VERBOSE=1` when coach is invoked with `--verbose` (drivers may use this to emit debug logs; not required by the protocol)
+4. Waits for the driver to exit (timeout: 5 minutes)
+5. Reads the JSON result from the driver's **stdout** (max 10 MB)
+6. Captures **stderr** and displays it on failure
 
 ## Driver resolution
 

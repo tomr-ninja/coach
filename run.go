@@ -72,6 +72,9 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 	}
 	defer client.Close()
 
+	if IsVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "resolving checksums...\n")
+	}
 	chunkChecksums, err := CollectDataChecksums(dataDir)
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("data checksums: %w", err)
@@ -94,6 +97,9 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 		_ = os.Remove(artifactsDir)
 	}()
 
+	if IsVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "running model in container...\n")
+	}
 	if err := client.Run(ctx, modelImage, dataDir, artifactsDir); err != nil {
 		return zeroFingerprint, fmt.Errorf("run model: %w", err)
 	}
@@ -121,6 +127,9 @@ func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, s3OutputD
 	}
 	defer client.Close()
 
+	if IsVerbose(ctx) {
+		fmt.Fprintf(os.Stderr, "resolving S3 checksums...\n")
+	}
 	checksums, err := ResolveChecksums(s3DataSource, cfg)
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("resolve checksums: %w", err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/tomr-ninja/coach/protocol"
 )
@@ -36,7 +37,7 @@ func main() {
 		cfg.Region = "fr-par"
 	}
 
-	input, err := io.ReadAll(os.Stdin)
+	input, err := io.ReadAll(io.LimitReader(os.Stdin, 10*1024*1024))
 	if err != nil {
 		writeResult(&protocol.DriverResult{Success: false, Error: "read stdin: " + err.Error()})
 		os.Exit(0)
@@ -51,7 +52,13 @@ func main() {
 	baseURL := "https://api.scaleway.com/serverless-jobs/v1alpha2/regions/" + cfg.Region
 	api := NewScalewayAPI(baseURL, cfg.Token, cfg.Region, cfg.Project, cfg.Org)
 
+	verbose := os.Getenv("COACH_VERBOSE") == "1"
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[scaleway driver] spec type=%s region=%s\n", spec.Type, cfg.Region)
+	}
+
 	var result *protocol.DriverResult
+	start := time.Now()
 
 	switch spec.Type {
 	case "submit":
@@ -64,6 +71,10 @@ func main() {
 		result = statusResult(api, spec.ID)
 	default:
 		result = &protocol.DriverResult{Success: false, Error: fmt.Sprintf("unknown type: %s", spec.Type)}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[scaleway driver] %s completed in %v\n", spec.Type, time.Since(start))
 	}
 
 	writeResult(result)
