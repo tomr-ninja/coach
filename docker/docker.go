@@ -77,7 +77,7 @@ func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error
 	return true, nil
 }
 
-func (c *Client) ImageDigest(ctx context.Context, imageName string) ([32]byte, error) {
+func (c *Client) EnsureImageDigest(ctx context.Context, imageName string) ([32]byte, error) {
 	inspect, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
 		pullResp, pullErr := c.internal.ImagePull(ctx, imageName, client.ImagePullOptions{})

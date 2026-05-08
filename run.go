@@ -256,7 +256,7 @@ func CollectDataChecksums(dataDir string) ([][32]byte, error) {
 }
 
 func resolveFingerprint(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte) ([32]byte, error) {
-	digest, err := client.ImageDigest(ctx, modelImage)
+	digest, err := client.EnsureImageDigest(ctx, modelImage)
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("image digest: %w", err)
 	}

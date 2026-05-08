@@ -190,12 +190,12 @@ func TestImageBuildAndExists(t *testing.T) {
 	assert.True(t, exists, "built image should exist")
 }
 
-func TestImageDigest(t *testing.T) {
+func TestEnsureImageDigest(t *testing.T) {
 	_, client := setupDockerPool(t)
 	tag := buildTestImage(t, client)
 	ctx := context.Background()
 
-	digest, err := client.ImageDigest(ctx, tag)
+	digest, err := client.EnsureImageDigest(ctx, tag)
 	require.NoError(t, err)
 	assert.NotEqual(t, [32]byte{}, digest, "digest should not be zero")
 }
@@ -610,12 +610,12 @@ RUN echo "build 1" > /version.txt
 	assert.True(t, exists)
 }
 
-func TestImageDigest_PullsIfAbsent(t *testing.T) {
+func TestEnsureImageDigest_PullsIfAbsent(t *testing.T) {
 	_, client := setupDockerPool(t)
 
 	// Use a tiny public image that we likely don't have locally
 	ctx := context.Background()
-	digest, err := client.ImageDigest(ctx, "alpine:3.21")
+	digest, err := client.EnsureImageDigest(ctx, "alpine:3.21")
 	require.NoError(t, err)
 	assert.NotEqual(t, [32]byte{}, digest, "should return a digest for alpine:3.21")
 }

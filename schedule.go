@@ -77,7 +77,7 @@ func ScheduleCreate(
 		return "", fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
 	}
 
-	digest, err := client.ImageDigest(ctx, modelImage)
+	digest, err := client.EnsureImageDigest(ctx, modelImage)
 	if err != nil {
 		return "", fmt.Errorf("image digest: %w", err)
 	}
