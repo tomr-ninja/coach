@@ -12,7 +12,7 @@ func ListScripts(ctx context.Context, modelImage string) ([]string, error) {
 		return nil, fmt.Errorf("validate model image: %w", err)
 	}
 
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}
@@ -35,7 +35,7 @@ func RunScript(ctx context.Context, modelImage string, script string, args []str
 		return fmt.Errorf("validate output dir: %w", err)
 	}
 
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	if err != nil {
 		return fmt.Errorf("create docker client: %w", err)
 	}

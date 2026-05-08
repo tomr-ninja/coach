@@ -19,7 +19,7 @@ import (
 func setupCleanupTest(t *testing.T) (tag string, cleanup func()) {
 	t.Helper()
 
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	require.NoError(t, err, "Docker daemon must be running for cleanup tests")
 	t.Cleanup(func() { client.Close() })
 
@@ -53,7 +53,7 @@ RUN echo "cleanup test %s" > /test.txt
 
 func imageExists(t *testing.T, tag string) bool {
 	t.Helper()
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	require.NoError(t, err)
 	defer client.Close()
 

@@ -21,7 +21,7 @@ type CleanupResult struct {
 // If maxAge is 0, all wrapper images are removed regardless of age.
 // If dryRun is true, images are only printed, not removed.
 func Cleanup(ctx context.Context, maxAge time.Duration, dryRun bool) (*CleanupResult, error) {
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("create docker client: %w", err)
 	}

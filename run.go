@@ -66,7 +66,7 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 		return zeroFingerprint, fmt.Errorf("validate output dir: %w", err)
 	}
 
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
 	}
@@ -121,7 +121,7 @@ func RunS3(ctx context.Context, cfg *Config, modelImage, s3DataSource, s3OutputD
 		return zeroFingerprint, fmt.Errorf("validate output dir: %w", err)
 	}
 
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	if err != nil {
 		return zeroFingerprint, fmt.Errorf("create docker client: %w", err)
 	}

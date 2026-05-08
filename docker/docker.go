@@ -50,11 +50,15 @@ type Client struct {
 	internal *client.Client
 }
 
-func NewRealDockerClient() (*Client, error) {
+func NewClient() (*Client, error) {
 	return coacherrors.Retry(context.Background(), coacherrors.RetryConfig{MaxElapsed: 5 * time.Second}, func() (*Client, error) {
 		cli, err := client.New(client.FromEnv)
 		if err != nil {
-			return nil, fmt.Errorf("create docker client: %w", err)
+			wrapped := fmt.Errorf("create docker client: %w", err)
+			if client.IsErrConnectionFailed(err) {
+				return nil, coacherrors.WithHint(wrapped, "Ensure Docker is running and available at DOCKER_HOST.")
+			}
+			return nil, wrapped
 		}
 		return &Client{internal: cli}, nil
 	})

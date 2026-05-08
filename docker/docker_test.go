@@ -137,7 +137,7 @@ func setupDockerPool(t *testing.T) (*dockertest.Pool, *Client) {
 	pool, err := dockertest.NewPool("")
 	require.NoError(t, err, "Docker daemon must be running for integration tests")
 
-	client, err := NewRealDockerClient()
+	client, err := NewClient()
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -174,7 +174,7 @@ RUN echo "test image ready"
 }
 
 func TestNewRealDockerClient(t *testing.T) {
-	client, err := NewRealDockerClient()
+	client, err := NewClient()
 	require.NoError(t, err)
 	require.NotNil(t, client)
 	client.Close()

@@ -60,7 +60,7 @@ func ScheduleCreate(
 		return "", fmt.Errorf("validate driver: %w", err)
 	}
 
-	client, err := docker.NewRealDockerClient()
+	client, err := docker.NewClient()
 	if err != nil {
 		return "", fmt.Errorf("create docker client: %w", err)
 	}
