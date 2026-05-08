@@ -113,7 +113,7 @@ func ScheduleCreate(
 		Type:            "submit",
 		Job:             job,
 	}
-	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config)
+	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config, cfg.DriverTimeoutDuration())
 	if err != nil {
 		if wrappedImage != "" {
 			if rmErr := client.ImageRemove(context.Background(), wrappedImage, true); rmErr != nil {
@@ -264,7 +264,7 @@ func ScheduleList(ctx context.Context, backendName string) ([]protocol.ScheduleE
 		ProtocolVersion: protocol.Version,
 		Type:            "list",
 	}
-	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config)
+	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config, cfg.DriverTimeoutDuration())
 	if err != nil {
 		return nil, fmt.Errorf("invoke driver: %w", err)
 	}
@@ -292,7 +292,7 @@ func ScheduleDelete(ctx context.Context, backendName, id string) error {
 		Type:            "delete",
 		ID:              id,
 	}
-	if _, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config); err != nil {
+	if _, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config, cfg.DriverTimeoutDuration()); err != nil {
 		return fmt.Errorf("invoke driver: %w", err)
 	}
 
@@ -315,7 +315,7 @@ func ScheduleStatus(ctx context.Context, backendName, id string) (*protocol.Stat
 		Type:            "status",
 		ID:              id,
 	}
-	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config)
+	result, err := InvokeDriverWithContext(ctx, backend.Driver, spec, backend.Config, cfg.DriverTimeoutDuration())
 	if err != nil {
 		return nil, fmt.Errorf("invoke driver: %w", err)
 	}

@@ -9,9 +9,12 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
+
+const defaultDriverTimeout = 5 * time.Minute
 
 var (
 	errConfigNotFound = errors.New("coach.json not found in current directory or ~/.config/coach/")
@@ -38,6 +41,7 @@ type Config struct {
 	S3             S3Config           `json:"s3"`
 	Registry       string             `json:"registry,omitempty"`
 	RegistryAuth   SecureString       `json:"registryAuth,omitzero"`
+	DriverTimeout  string             `json:"driverTimeout,omitempty"`
 }
 
 type Backend struct {
@@ -114,6 +118,18 @@ func (c *Config) Backend(name string) (*Backend, error) {
 		return nil, err
 	}
 	return &b, nil
+}
+
+// DriverTimeoutDuration parses the configured driver timeout or returns the default (5 min).
+func (c *Config) DriverTimeoutDuration() time.Duration {
+	if c.DriverTimeout == "" {
+		return defaultDriverTimeout
+	}
+	d, err := time.ParseDuration(c.DriverTimeout)
+	if err != nil {
+		return defaultDriverTimeout
+	}
+	return d
 }
 
 var envVarPattern = regexp.MustCompile(`"\$[A-Za-z_][A-Za-z0-9_]*"`)

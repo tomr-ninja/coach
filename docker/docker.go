@@ -24,22 +24,8 @@ import (
 	"github.com/moby/moby/client"
 
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
+	"github.com/tomr-ninja/coach/internal/utils"
 )
-
-type ctxKey string
-
-const verboseKey ctxKey = "docker-verbose"
-
-// WithVerbose returns a context marked as verbose for Docker operations.
-func WithVerbose(ctx context.Context) context.Context {
-	return context.WithValue(ctx, verboseKey, true)
-}
-
-// IsVerbose reports whether the context has verbose mode enabled.
-func isVerbose(ctx context.Context) bool {
-	v, _ := ctx.Value(verboseKey).(bool)
-	return v
-}
 
 var (
 	errNoDigest      = errors.New("no digest found for image")
@@ -107,7 +93,7 @@ func (c *Client) EnsureImageDigest(ctx context.Context, imageName string) ([32]b
 }
 
 func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag string) error {
-	suppress := !isVerbose(ctx)
+	suppress := !utils.IsVerbose(ctx)
 	resp, err := c.internal.ImageBuild(ctx, buildContext, client.ImageBuildOptions{
 		Tags:           []string{tag},
 		SuppressOutput: suppress,
@@ -193,9 +179,15 @@ func registryAuth(imageTag, authStr string) string {
 	return ""
 }
 
-func BuildContextDir(dir string) (io.Reader, error) {
+func BuildContextDir(dir string) (_ io.Reader, retErr error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
+	defer func() {
+		if closeErr := tw.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("close tar: %w", closeErr)
+		}
+	}()
+
 	if walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -232,9 +224,6 @@ func BuildContextDir(dir string) (io.Reader, error) {
 		return closeErr
 	}); walkErr != nil {
 		return nil, fmt.Errorf("build context: %w", walkErr)
-	}
-	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("close tar: %w", err)
 	}
 
 	return &buf, nil
@@ -281,13 +270,13 @@ func (c *Client) Run(ctx context.Context, imageName, dataDir, outputDir string) 
 		return fmt.Errorf("create container: %w", err)
 	}
 	defer func() {
-		if isVerbose(ctx) {
+		if utils.IsVerbose(ctx) {
 			fmt.Fprintf(os.Stderr, "removing container %s\n", resp.ID[:12])
 		}
 		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
 	}()
 
-	if isVerbose(ctx) {
+	if utils.IsVerbose(ctx) {
 		fmt.Fprintf(os.Stderr, "starting container %s (%s)\n", resp.ID[:12], imageName)
 	}
 	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
@@ -344,13 +333,13 @@ func (c *Client) RunWrapped(ctx context.Context, imageName string, envVars map[s
 		return fmt.Errorf("create container: %w", err)
 	}
 	defer func() {
-		if isVerbose(ctx) {
+		if utils.IsVerbose(ctx) {
 			fmt.Fprintf(os.Stderr, "removing container %s\n", resp.ID[:12])
 		}
 		_, _ = c.internal.ContainerRemove(context.Background(), resp.ID, client.ContainerRemoveOptions{Force: true})
 	}()
 
-	if isVerbose(ctx) {
+	if utils.IsVerbose(ctx) {
 		fmt.Fprintf(os.Stderr, "starting container %s (%s)\n", resp.ID[:12], imageName)
 	}
 	if _, err := c.internal.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {

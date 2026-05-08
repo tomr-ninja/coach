@@ -16,8 +16,7 @@ import (
 )
 
 const (
-	defaultDriverTimeout = 5 * time.Minute
-	maxDriverOutput      = 10 * 1024 * 1024
+	maxDriverOutput = 10 * 1024 * 1024
 )
 
 var (
@@ -44,12 +43,12 @@ func ValidateDriver(driverPath string) error {
 }
 
 func InvokeDriver(driverPath string, spec *protocol.Spec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
-	return InvokeDriverWithContext(context.Background(), driverPath, spec, backendConfig)
+	return InvokeDriverWithContext(context.Background(), driverPath, spec, backendConfig, defaultDriverTimeout)
 }
 
-func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *protocol.Spec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
+func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *protocol.Spec, backendConfig json.RawMessage, timeout time.Duration) (*protocol.DriverResult, error) {
 	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, defaultDriverTimeout)
+	ctx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	specJSON, err := json.Marshal(spec)
@@ -71,7 +70,7 @@ func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *proto
 	// Exit code non-zero = driver crashed/bugged. Exit code 0 with success:false = operational error.
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("driver %s timed out after %s: %w", driverPath, defaultDriverTimeout, err)
+			return nil, fmt.Errorf("driver %s timed out after %s: %w", driverPath, timeout, err)
 		}
 		return nil, fmt.Errorf("driver %s crashed: %w\nstderr: %s", driverPath, err, stderr.String())
 	}
