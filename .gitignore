@@ -4,5 +4,6 @@ __pycache__/
 .venv/
 *.pyc
 drivers/coach-scaleway/coach-scaleway
+drivers/coach-nebius/coach-nebius
 .pi
 .idea
