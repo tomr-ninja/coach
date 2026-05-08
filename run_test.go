@@ -97,8 +97,8 @@ func TestFileSHA256(t *testing.T) {
 func TestBuildS3ContainerEnv(t *testing.T) {
 	cfg := &Config{
 		S3: S3Config{
-			AccessKeyID:     "key",
-			SecretAccessKey: "secret",
+			AccessKeyID:     NewSecureString("key"),
+			SecretAccessKey: NewSecureString("secret"),
 			Region:          "us-west-2",
 			Endpoint:        "http://minio:9000",
 		},

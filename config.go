@@ -25,11 +25,11 @@ var (
 )
 
 type S3Config struct {
-	AccessKeyID     string `json:"accessKeyId,omitempty"`
-	SecretAccessKey string `json:"secretAccessKey,omitempty"`
-	Region          string `json:"region,omitempty"`
-	Endpoint        string `json:"endpoint,omitempty"`
-	Provider        string `json:"provider,omitempty"`
+	AccessKeyID     SecureString `json:"accessKeyId,omitzero"`
+	SecretAccessKey SecureString `json:"secretAccessKey,omitzero"`
+	Region          string       `json:"region,omitempty"`
+	Endpoint        string       `json:"endpoint,omitempty"`
+	Provider        string       `json:"provider,omitempty"`
 }
 
 type Config struct {
@@ -37,7 +37,7 @@ type Config struct {
 	DefaultBackend string             `json:"defaultBackend,omitempty"`
 	S3             S3Config           `json:"s3"`
 	Registry       string             `json:"registry,omitempty"`
-	RegistryAuth   string             `json:"registryAuth,omitempty"`
+	RegistryAuth   SecureString       `json:"registryAuth,omitzero"`
 }
 
 type Backend struct {
@@ -53,8 +53,8 @@ func buildS3EnvVars(s3 S3Config) map[string]string {
 	return map[string]string{
 		"RCLONE_CONFIG_S3_TYPE":              "s3",
 		"RCLONE_CONFIG_S3_PROVIDER":          provider,
-		"RCLONE_CONFIG_S3_ACCESS_KEY_ID":     s3.AccessKeyID,
-		"RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": s3.SecretAccessKey,
+		"RCLONE_CONFIG_S3_ACCESS_KEY_ID":     s3.AccessKeyID.Reveal(),
+		"RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": s3.SecretAccessKey.Reveal(),
 		"RCLONE_CONFIG_S3_REGION":            s3.Region,
 		"RCLONE_CONFIG_S3_ENDPOINT":          s3.Endpoint,
 	}
@@ -151,6 +151,17 @@ func expandEnvInStruct(v any) error {
 func expandEnvInValue(val reflect.Value) error {
 	switch val.Kind() {
 	case reflect.Struct:
+		// Handle SecureString specially: expand env vars in its underlying value.
+		if val.Type() == reflect.TypeFor[SecureString]() {
+			rawValue := val.FieldByName("value").String()
+			expanded, err := expandEnvString(rawValue)
+			if err != nil {
+				return err
+			}
+			ss := val.Addr().Interface().(*SecureString) //nolint:errcheck // the type already proven above
+			ss.SetValue(expanded)
+			return nil
+		}
 		for _, field := range val.Fields() {
 			if field.CanSet() {
 				if err := expandEnvInValue(field); err != nil {

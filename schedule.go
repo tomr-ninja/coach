@@ -123,7 +123,7 @@ func ScheduleCreate(
 			return "", fmt.Errorf("inspect image entrypoint: %w", entryErr)
 		}
 
-		wrappedImage, wrapErr = WrapImage(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth, entrypoint)
+		wrappedImage, wrapErr = WrapImage(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth.Reveal(), entrypoint)
 		if wrapErr != nil {
 			return "", fmt.Errorf("wrap image: %w", wrapErr)
 		}

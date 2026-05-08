@@ -172,12 +172,12 @@ func parseS3PathOut(path string) (bucket, prefix string, err error) {
 
 func newS3Client(ctx context.Context, cfg *Config) (*s3.Client, error) {
 	var opts []func(*config.LoadOptions) error
-	if cfg.S3.AccessKeyID != "" {
+	if !cfg.S3.AccessKeyID.IsEmpty() {
 		opts = append(opts,
 			config.WithRegion(cfg.S3.Region),
 			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-				cfg.S3.AccessKeyID,
-				cfg.S3.SecretAccessKey,
+				cfg.S3.AccessKeyID.Reveal(),
+				cfg.S3.SecretAccessKey.Reveal(),
 				"",
 			)),
 		)

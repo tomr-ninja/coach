@@ -13,8 +13,8 @@ import (
 
 func TestBuildS3EnvVars(t *testing.T) {
 	cfg := S3Config{
-		AccessKeyID:     "key",
-		SecretAccessKey: "secret",
+		AccessKeyID:     NewSecureString("key"),
+		SecretAccessKey: NewSecureString("secret"),
 		Region:          "us-east-1",
 		Endpoint:        "http://localhost:9000",
 		Provider:        "Minio",
