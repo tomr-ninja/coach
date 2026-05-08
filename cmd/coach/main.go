@@ -15,6 +15,7 @@ import (
 
 	"github.com/tomr-ninja/coach"
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
+	"github.com/tomr-ninja/coach/internal/validate"
 	"github.com/tomr-ninja/coach/protocol"
 )
 
@@ -88,13 +89,13 @@ func main() {
 		}
 		modelImage := posArgs[0]
 
-		if err := coach.ValidateModelImage(modelImage); err != nil {
+		if err := validate.ModelImage(modelImage); err != nil {
 			handleError(err)
 		}
-		if err := coach.ValidateDataPath(data); err != nil {
+		if err := validate.DataPath(data); err != nil {
 			handleError(err)
 		}
-		if err := coach.ValidateOutputDir(output); err != nil {
+		if err := validate.OutputDir(output); err != nil {
 			handleError(err)
 		}
 
@@ -123,7 +124,7 @@ func main() {
 					"usage: coach script ls <model-image>"))
 			}
 			modelImage := cmd.Args()[0]
-			if err := coach.ValidateModelImage(modelImage); err != nil {
+			if err := validate.ModelImage(modelImage); err != nil {
 				handleError(err)
 			}
 
@@ -165,16 +166,16 @@ func main() {
 			scriptName := remaining[1]
 			scriptArgs := remaining[2:]
 
-			if err := coach.ValidateModelImage(modelImage); err != nil {
+			if err := validate.ModelImage(modelImage); err != nil {
 				handleError(err)
 			}
-			if err := coach.ValidateScriptName(scriptName); err != nil {
+			if err := validate.ScriptName(scriptName); err != nil {
 				handleError(err)
 			}
-			if err := coach.ValidateDataPath(data); err != nil {
+			if err := validate.DataPath(data); err != nil {
 				handleError(err)
 			}
-			if err := coach.ValidateOutputDir(output); err != nil {
+			if err := validate.OutputDir(output); err != nil {
 				handleError(err)
 			}
 
@@ -241,20 +242,20 @@ func main() {
 				handleError(coacherrors.New(coacherrors.KindUser, "flags -data and -output are required"))
 			}
 
-			if err := coach.ValidateModelImage(modelImage); err != nil {
+			if err := validate.ModelImage(modelImage); err != nil {
 				handleError(err)
 			}
-			if err := coach.ValidateDataPath(dataSource); err != nil {
+			if err := validate.DataPath(dataSource); err != nil {
 				handleError(err)
 			}
-			if err := coach.ValidateOutputDir(outputURI); err != nil {
+			if err := validate.OutputDir(outputURI); err != nil {
 				handleError(err)
 			}
-			if err := coach.ValidateCron(sched); err != nil {
+			if err := validate.Cron(sched); err != nil {
 				handleError(err)
 			}
 			if script != "" {
-				if err := coach.ValidateScriptName(script); err != nil {
+				if err := validate.ScriptName(script); err != nil {
 					handleError(err)
 				}
 			}

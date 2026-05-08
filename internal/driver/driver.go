@@ -1,4 +1,4 @@
-package coach
+package driver
 
 import (
 	"bytes"
@@ -16,7 +16,8 @@ import (
 )
 
 const (
-	maxDriverOutput = 10 * 1024 * 1024
+	maxDriverOutput      = 10 * 1024 * 1024
+	defaultDriverTimeout = 5 * time.Minute
 )
 
 var (
@@ -28,7 +29,8 @@ var (
 	errDriverVersion        = coacherrors.New(coacherrors.KindDriver, "driver protocol version mismatch")
 )
 
-func ValidateDriver(driverPath string) error {
+// Validate checks that the driver path points to an executable file.
+func Validate(driverPath string) error {
 	stat, err := os.Stat(driverPath)
 	if err != nil {
 		return fmt.Errorf("validate driver %s: %w", driverPath, err)
@@ -42,11 +44,13 @@ func ValidateDriver(driverPath string) error {
 	return nil
 }
 
-func InvokeDriver(driverPath string, spec *protocol.Spec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
-	return InvokeDriverWithContext(context.Background(), driverPath, spec, backendConfig, defaultDriverTimeout)
+// Invoke runs a driver with the default background context and timeout.
+func Invoke(driverPath string, spec *protocol.Spec, backendConfig json.RawMessage) (*protocol.DriverResult, error) {
+	return InvokeWithContext(context.Background(), driverPath, spec, backendConfig, defaultDriverTimeout)
 }
 
-func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *protocol.Spec, backendConfig json.RawMessage, timeout time.Duration) (*protocol.DriverResult, error) {
+// InvokeWithContext runs a driver with a given context and timeout.
+func InvokeWithContext(ctx context.Context, driverPath string, spec *protocol.Spec, backendConfig json.RawMessage, timeout time.Duration) (*protocol.DriverResult, error) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -59,7 +63,7 @@ func InvokeDriverWithContext(ctx context.Context, driverPath string, spec *proto
 	cmd := exec.CommandContext(ctx, driverPath)
 	cmd.Stdin = io.LimitReader(bytes.NewReader(specJSON), maxDriverOutput)
 	cmd.Env = append(os.Environ(), "COACH_BACKEND_CONFIG="+string(backendConfig))
-	if IsVerbose(ctx) {
+	if verbose := ctx.Value("coach-verbose"); verbose != nil {
 		cmd.Env = append(cmd.Env, "COACH_VERBOSE=1")
 	}
 

@@ -5,10 +5,11 @@ import (
 	"fmt"
 
 	"github.com/tomr-ninja/coach/docker"
+	"github.com/tomr-ninja/coach/internal/validate"
 )
 
 func ListScripts(ctx context.Context, modelImage string) ([]string, error) {
-	if err := ValidateModelImage(modelImage); err != nil {
+	if err := validate.ModelImage(modelImage); err != nil {
 		return nil, fmt.Errorf("validate model image: %w", err)
 	}
 
@@ -22,16 +23,16 @@ func ListScripts(ctx context.Context, modelImage string) ([]string, error) {
 }
 
 func RunScript(ctx context.Context, modelImage string, script string, args []string, dataDir string, outputDir string) error {
-	if err := ValidateModelImage(modelImage); err != nil {
+	if err := validate.ModelImage(modelImage); err != nil {
 		return fmt.Errorf("validate model image: %w", err)
 	}
-	if err := ValidateScriptName(script); err != nil {
+	if err := validate.ScriptName(script); err != nil {
 		return fmt.Errorf("validate script name: %w", err)
 	}
-	if err := ValidateDataPath(dataDir); err != nil {
+	if err := validate.DataPath(dataDir); err != nil {
 		return fmt.Errorf("validate data path: %w", err)
 	}
-	if err := ValidateOutputDir(outputDir); err != nil {
+	if err := validate.OutputDir(outputDir); err != nil {
 		return fmt.Errorf("validate output dir: %w", err)
 	}
 

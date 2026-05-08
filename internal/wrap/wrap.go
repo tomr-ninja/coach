@@ -1,4 +1,4 @@
-package coach
+package wrap
 
 import (
 	"context"
@@ -11,16 +11,23 @@ import (
 	"text/template"
 
 	"github.com/tomr-ninja/coach/docker"
+	"github.com/tomr-ninja/coach/internal/utils"
 )
 
-//go:embed templates/entrypoint.template
-var entrypointTemplate string
+var (
+	//go:embed templates/entrypoint.template
+	entrypointTemplate string
 
-//go:embed templates/Dockerfile.template
-var dockerfileTemplate string
+	//go:embed templates/Dockerfile.template
+	dockerfileTemplate string
+)
 
-func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, registry, registryAuth string, entrypoint []string) (string, error) {
-	safeName := sanitizeImageName(baseImage)
+// ErrNoRegistry is returned when a registry is required but not configured.
+var ErrNoRegistry = fmt.Errorf("registry is required for remote S3 runs (set in coach.json)")
+
+// Image builds a wrapper Docker image on top of the base model image.
+func Image(ctx context.Context, dc *docker.Client, baseImage, fingerprint, registry, registryAuth string, entrypoint []string) (string, error) {
+	safeName := SanitizeImageName(baseImage)
 	shortFP := fingerprint
 	if len(shortFP) > 12 {
 		shortFP = shortFP[:12]
@@ -40,7 +47,7 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 	if len(entrypoint) > 0 {
 		quoted := make([]string, len(entrypoint))
 		for i, e := range entrypoint {
-			quoted[i] = shellQuote(e)
+			quoted[i] = ShellQuote(e)
 		}
 		runCommand = fmt.Sprintf("%s \"$@\"", strings.Join(quoted, " "))
 	} else {
@@ -79,7 +86,7 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 		return "", fmt.Errorf("build context: %w", ctxErr)
 	}
 
-	if IsVerbose(ctx) {
+	if utils.IsVerbose(ctx) {
 		fmt.Fprintf(os.Stderr, "building wrapper image %s...\n", tag)
 	}
 	if err := dc.ImageBuild(ctx, buildCtx, tag); err != nil {
@@ -87,7 +94,7 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 	}
 
 	if registry != "" {
-		if IsVerbose(ctx) {
+		if utils.IsVerbose(ctx) {
 			fmt.Fprintf(os.Stderr, "pushing wrapper image %s...\n", tag)
 		}
 		if err := dc.ImagePush(ctx, tag, registryAuth); err != nil {
@@ -100,14 +107,16 @@ func WrapImage(ctx context.Context, dc *docker.Client, baseImage, fingerprint, r
 
 var safeImageRegexp = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
 
-func sanitizeImageName(name string) string {
+// SanitizeImageName converts a Docker image reference into a safe tag fragment.
+func SanitizeImageName(name string) string {
 	parts := strings.Split(name, "/")
 	last := parts[len(parts)-1]
 	last = strings.ReplaceAll(last, ":", "-")
 	return safeImageRegexp.ReplaceAllString(last, "-")
 }
 
-func shellQuote(s string) string {
+// ShellQuote escapes a string for safe use in a POSIX shell.
+func ShellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}

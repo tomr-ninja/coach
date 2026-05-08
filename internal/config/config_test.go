@@ -1,4 +1,4 @@
-package coach
+package config
 
 import (
 	"encoding/json"
@@ -10,29 +10,6 @@ import (
 
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
-
-func TestBuildS3EnvVars(t *testing.T) {
-	cfg := S3Config{
-		AccessKeyID:     NewSecureString("key"),
-		SecretAccessKey: NewSecureString("secret"),
-		Region:          "us-east-1",
-		Endpoint:        "http://localhost:9000",
-		Provider:        "Minio",
-	}
-
-	got := buildS3EnvVars(cfg)
-	assert.Equal(t, "s3", got["RCLONE_CONFIG_S3_TYPE"])
-	assert.Equal(t, "Minio", got["RCLONE_CONFIG_S3_PROVIDER"])
-	assert.Equal(t, "key", got["RCLONE_CONFIG_S3_ACCESS_KEY_ID"])
-	assert.Equal(t, "secret", got["RCLONE_CONFIG_S3_SECRET_ACCESS_KEY"])
-	assert.Equal(t, "us-east-1", got["RCLONE_CONFIG_S3_REGION"])
-	assert.Equal(t, "http://localhost:9000", got["RCLONE_CONFIG_S3_ENDPOINT"])
-}
-
-func TestBuildS3EnvVarsDefaultsProvider(t *testing.T) {
-	got := buildS3EnvVars(S3Config{})
-	assert.Equal(t, "AWS", got["RCLONE_CONFIG_S3_PROVIDER"])
-}
 
 func TestExpandEnvString(t *testing.T) {
 	t.Run("not env var", func(t *testing.T) {
@@ -52,7 +29,7 @@ func TestExpandEnvString(t *testing.T) {
 		got, err := expandEnvString("$COACH_MISSING_VAR")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errEnvVarNotSet)
-		assert.Contains(t, coacherrors.GetHint(err), "replace \"$COACH_MISSING_VAR\" with a literal value")
+		assert.Contains(t, coacherrors.GetHint(err), "replace \"COACH_MISSING_VAR\" with a literal value")
 		assert.Empty(t, got)
 	})
 }
@@ -84,7 +61,7 @@ func TestExpandEnvInConfig(t *testing.T) {
 		_, err := expandEnvInConfig(raw)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errEnvVarNotSet)
-		assert.Contains(t, coacherrors.GetHint(err), "replace \"$COACH_MISSING\" with a literal value")
+		assert.Contains(t, coacherrors.GetHint(err), "replace \"COACH_MISSING\" with a literal value")
 	})
 
 	t.Run("multiple env vars", func(t *testing.T) {
@@ -122,7 +99,7 @@ func TestExpandEnvInStruct(t *testing.T) {
 		err := expandEnvInStruct(&cfg)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errEnvVarNotSet)
-		assert.Contains(t, coacherrors.GetHint(err), "replace \"$COACH_MISSING\" with a literal value")
+		assert.Contains(t, coacherrors.GetHint(err), "replace \"COACH_MISSING\" with a literal value")
 	})
 }
 

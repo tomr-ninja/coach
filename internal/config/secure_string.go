@@ -1,4 +1,4 @@
-package coach
+package config
 
 import (
 	"encoding/json"

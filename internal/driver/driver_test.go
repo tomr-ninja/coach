@@ -1,4 +1,4 @@
-package coach
+package driver
 
 import (
 	"os"
@@ -34,13 +34,13 @@ func TestValidateDriver(t *testing.T) {
 	t.Run("valid executable file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "driver")
 		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755))
-		err := ValidateDriver(path)
+		err := Validate(path)
 		require.NoError(t, err)
 	})
 
 	t.Run("directory", func(t *testing.T) {
 		path := t.TempDir()
-		err := ValidateDriver(path)
+		err := Validate(path)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errDriverNotFile)
 	})
@@ -48,14 +48,14 @@ func TestValidateDriver(t *testing.T) {
 	t.Run("not executable", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "driver")
 		require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
-		err := ValidateDriver(path)
+		err := Validate(path)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errDriverNotExecutable)
 	})
 
 	t.Run("missing", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing")
-		err := ValidateDriver(path)
+		err := Validate(path)
 		require.Error(t, err)
 	})
 }
@@ -69,7 +69,7 @@ func TestInvokeDriverWithContext(t *testing.T) {
 		driver := writeFakeDriver(t, `cat > /dev/null
 echo '{"success":true,"protocolVersion":1,"submitResult":{"id":"123"}}'`)
 
-		result, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
+		result, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		assert.True(t, result.Success)
@@ -81,7 +81,7 @@ echo '{"success":true,"protocolVersion":1,"submitResult":{"id":"123"}}'`)
 		driver := writeFakeDriver(t, `cat > /dev/null
 echo '{"success":false,"protocolVersion":1,"error":"bad input"}'`)
 
-		_, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
+		_, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errDriverFailure)
 		assert.Contains(t, err.Error(), "bad input")
@@ -91,7 +91,7 @@ echo '{"success":false,"protocolVersion":1,"error":"bad input"}'`)
 		driver := writeFakeDriver(t, `cat > /dev/null
 echo '{"success":false,"protocolVersion":1}'`)
 
-		_, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
+		_, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errDriverEmptyError)
 	})
@@ -100,7 +100,7 @@ echo '{"success":false,"protocolVersion":1}'`)
 		driver := writeFakeDriver(t, `cat > /dev/null
 echo '{"success":true,"protocolVersion":99}'`)
 
-		_, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
+		_, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errDriverVersion)
 	})
@@ -109,7 +109,7 @@ echo '{"success":true,"protocolVersion":99}'`)
 		driver := writeFakeDriver(t, `cat > /dev/null
 echo 'not-json'`)
 
-		_, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
+		_, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "parse driver output")
 	})
@@ -118,7 +118,7 @@ echo 'not-json'`)
 		driver := writeFakeDriver(t, `cat > /dev/null
 exit 1`)
 
-		_, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
+		_, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, nil, defaultDriverTimeout)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "driver")
 		assert.Contains(t, err.Error(), "crashed")
@@ -129,7 +129,7 @@ exit 1`)
 config="$COACH_BACKEND_CONFIG"
 echo "{\"success\":true,\"protocolVersion\":1,\"submitResult\":{\"id\":\"$config\"}}"`)
 
-		result, err := InvokeDriverWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, []byte(`my-backend-config`), defaultDriverTimeout)
+		result, err := InvokeWithContext(t.Context(), driver, &protocol.Spec{Type: "submit"}, []byte(`my-backend-config`), defaultDriverTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, result.SubmitResult)
 		assert.Equal(t, "my-backend-config", result.SubmitResult.ID)

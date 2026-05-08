@@ -1,4 +1,4 @@
-package coach
+package wrap
 
 import (
 	"testing"
@@ -23,7 +23,7 @@ func TestSanitizeImageName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, sanitizeImageName(tt.input), "input: %q", tt.input)
+			assert.Equal(t, tt.want, SanitizeImageName(tt.input), "input: %q", tt.input)
 		})
 	}
 }
@@ -45,7 +45,7 @@ func TestShellQuote(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, shellQuote(tt.input), "input: %q", tt.input)
+			assert.Equal(t, tt.want, ShellQuote(tt.input), "input: %q", tt.input)
 		})
 	}
 }

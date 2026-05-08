@@ -1,4 +1,4 @@
-package coach
+package config
 
 import (
 	"encoding/json"
@@ -47,21 +47,6 @@ type Config struct {
 type Backend struct {
 	Driver string          `json:"driver"`
 	Config json.RawMessage `json:"config,omitempty"`
-}
-
-func buildS3EnvVars(s3 S3Config) map[string]string {
-	provider := s3.Provider
-	if provider == "" {
-		provider = "AWS"
-	}
-	return map[string]string{
-		"RCLONE_CONFIG_S3_TYPE":              "s3",
-		"RCLONE_CONFIG_S3_PROVIDER":          provider,
-		"RCLONE_CONFIG_S3_ACCESS_KEY_ID":     s3.AccessKeyID.Reveal(),
-		"RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": s3.SecretAccessKey.Reveal(),
-		"RCLONE_CONFIG_S3_REGION":            s3.Region,
-		"RCLONE_CONFIG_S3_ENDPOINT":          s3.Endpoint,
-	}
 }
 
 func LoadConfig() (*Config, error) {
@@ -144,7 +129,7 @@ func expandEnvString(s string) (string, error) {
 	if !ok {
 		return "", coacherrors.WithHint(
 			fmt.Errorf("%w: %q", errEnvVarNotSet, name),
-			fmt.Sprintf("Export %s=... before running coach, or replace \"$%s\" with a literal value in coach.json", name, name),
+			fmt.Sprintf("Export %s=... before running coach, or replace \"%s\" with a literal value in coach.json", name, name),
 		)
 	}
 
@@ -225,7 +210,7 @@ func expandEnvInConfig(raw json.RawMessage) (json.RawMessage, error) {
 		if !ok {
 			expandErr = coacherrors.WithHint(
 				fmt.Errorf("%w: %q", errEnvVarNotSet, name),
-				fmt.Sprintf("Export %s=... before running coach, or replace \"$%s\" with a literal value in coach.json", name, name),
+				fmt.Sprintf("Export %s=... before running coach, or replace \"%s\" with a literal value in coach.json", name, name),
 			)
 			return match
 		}

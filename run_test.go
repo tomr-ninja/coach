@@ -8,6 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tomr-ninja/coach/internal/artifact"
+	"github.com/tomr-ninja/coach/internal/config"
 )
 
 func TestArtifactFingerprint(t *testing.T) {
@@ -16,19 +19,19 @@ func TestArtifactFingerprint(t *testing.T) {
 	chk2 := sha256.Sum256([]byte("b"))
 
 	// Order should not matter
-	fp1 := artifactFingerprint(digest, [][32]byte{chk1, chk2})
-	fp2 := artifactFingerprint(digest, [][32]byte{chk2, chk1})
+	fp1 := artifact.Fingerprint(digest, [][32]byte{chk1, chk2})
+	fp2 := artifact.Fingerprint(digest, [][32]byte{chk2, chk1})
 	assert.Equal(t, fp1, fp2, "fingerprint should be order-independent")
 
 	// Different inputs -> different output
-	fp3 := artifactFingerprint(digest, [][32]byte{chk1})
+	fp3 := artifact.Fingerprint(digest, [][32]byte{chk1})
 	assert.NotEqual(t, fp1, fp3, "different checksums should yield different fingerprint")
 }
 
 func TestPrepareArtifactDir(t *testing.T) {
 	t.Run("creates dir", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "artifacts")
-		err := prepareArtifactDir(path, false)
+		err := artifact.PrepareDir(path, false)
 		require.NoError(t, err)
 		info, err := os.Stat(path)
 		require.NoError(t, err)
@@ -37,15 +40,15 @@ func TestPrepareArtifactDir(t *testing.T) {
 
 	t.Run("errors when exists and not forced", func(t *testing.T) {
 		path := t.TempDir()
-		err := prepareArtifactDir(path, false)
+		err := artifact.PrepareDir(path, false)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errArtifactExists)
+		assert.ErrorIs(t, err, artifact.ErrExists)
 	})
 
 	t.Run("removes and recreates when forced", func(t *testing.T) {
 		path := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(path, "old.txt"), []byte("x"), 0o644))
-		err := prepareArtifactDir(path, true)
+		err := artifact.PrepareDir(path, true)
 		require.NoError(t, err)
 		entries, err := os.ReadDir(path)
 		require.NoError(t, err)
@@ -57,22 +60,22 @@ func TestValidateArtifactDir(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		path := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(path, "out.txt"), []byte("x"), 0o644))
-		err := validateArtifactDir(path)
+		err := artifact.ValidateDir(path)
 		require.NoError(t, err)
 	})
 
 	t.Run("missing", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing")
-		err := validateArtifactDir(path)
+		err := artifact.ValidateDir(path)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errArtifactMissing)
+		assert.ErrorIs(t, err, artifact.ErrMissing)
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		path := t.TempDir()
-		err := validateArtifactDir(path)
+		err := artifact.ValidateDir(path)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, errArtifactEmpty)
+		assert.ErrorIs(t, err, artifact.ErrEmpty)
 	})
 }
 
@@ -81,24 +84,25 @@ func TestFileSHA256(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "file.txt")
 		require.NoError(t, os.WriteFile(path, []byte("hello"), 0o644))
 
-		got, err := fileSHA256(path)
+		got, err := artifact.CollectChecksums(filepath.Dir(path))
 		require.NoError(t, err)
+		require.Len(t, got, 1)
 		want := sha256.Sum256([]byte("hello"))
-		assert.Equal(t, want, got)
+		assert.Equal(t, want, got[0])
 	})
 
 	t.Run("missing file", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing")
-		_, err := fileSHA256(path)
+		_, err := artifact.CollectChecksums(path)
 		require.Error(t, err)
 	})
 }
 
 func TestBuildS3ContainerEnv(t *testing.T) {
-	cfg := &Config{
-		S3: S3Config{
-			AccessKeyID:     NewSecureString("key"),
-			SecretAccessKey: NewSecureString("secret"),
+	cfg := &config.Config{
+		S3: config.S3Config{
+			AccessKeyID:     config.NewSecureString("key"),
+			SecretAccessKey: config.NewSecureString("secret"),
 			Region:          "us-west-2",
 			Endpoint:        "http://minio:9000",
 		},

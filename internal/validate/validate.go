@@ -1,4 +1,4 @@
-package coach
+package validate
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/robfig/cron/v3"
+
+	"github.com/tomr-ninja/coach/protocol"
 )
 
 var (
@@ -24,11 +26,15 @@ var (
 	ErrScriptNameEmpty     = errors.New("script name is empty")
 	ErrScriptNamePathSep   = errors.New("script name must not contain path separators")
 	ErrScriptNameTraversal = errors.New("script name must not contain '..'")
+	ErrMixedLocalS3        = errors.New("data source and output must both be local or both be s3")
+	ErrEmptySubmitID       = errors.New("submit result has empty ID")
+	ErrEmptyStatusID       = errors.New("status result has empty ID")
+	ErrEmptyState          = errors.New("status result has empty State")
 )
 
-// ValidateModelImage rejects empty strings and images without an explicit tag
-// or digest, because Docker’s default resolution can be surprising.
-func ValidateModelImage(image string) error {
+// ModelImage rejects empty strings and images without an explicit tag
+// or digest, because Docker's default resolution can be surprising.
+func ModelImage(image string) error {
 	if strings.TrimSpace(image) == "" {
 		return ErrModelImageEmpty
 	}
@@ -42,9 +48,9 @@ func ValidateModelImage(image string) error {
 	return nil
 }
 
-// ValidateDataPath checks that a local data directory exists. S3 URIs are
+// DataPath checks that a local data directory exists. S3 URIs are
 // validated for format but not resolved remotely.
-func ValidateDataPath(path string) error {
+func DataPath(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return ErrDataPathEmpty
 	}
@@ -67,9 +73,9 @@ func ValidateDataPath(path string) error {
 	return nil
 }
 
-// ValidateOutputDir checks that a local output directory exists. S3 URIs are
+// OutputDir checks that a local output directory exists. S3 URIs are
 // validated for format only.
-func ValidateOutputDir(dir string) error {
+func OutputDir(dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return ErrOutputDirEmpty
 	}
@@ -92,9 +98,9 @@ func ValidateOutputDir(dir string) error {
 	return nil
 }
 
-// ValidateCron parses a cron expression using the standard 5-field format.
+// Cron parses a cron expression using the standard 5-field format.
 // An empty expression is treated as valid (one-off job).
-func ValidateCron(expr string) error {
+func Cron(expr string) error {
 	if strings.TrimSpace(expr) == "" {
 		return nil
 	}
@@ -105,8 +111,8 @@ func ValidateCron(expr string) error {
 	return nil
 }
 
-// ValidateScriptName rejects path traversal and empty identifiers.
-func ValidateScriptName(name string) error {
+// ScriptName rejects path traversal and empty identifiers.
+func ScriptName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return ErrScriptNameEmpty
 	}
@@ -115,6 +121,35 @@ func ValidateScriptName(name string) error {
 	}
 	if strings.Contains(name, "..") {
 		return ErrScriptNameTraversal
+	}
+	return nil
+}
+
+// LocalVsS3 ensures data source and output are either both local or both S3.
+func LocalVsS3(dataSource, outputURI string) error {
+	dataIsS3 := strings.HasPrefix(dataSource, "s3://")
+	outputIsS3 := strings.HasPrefix(outputURI, "s3://")
+	if dataIsS3 != outputIsS3 {
+		return ErrMixedLocalS3
+	}
+	return nil
+}
+
+// SubmitResult checks that a driver submit result has a non-empty ID.
+func SubmitResult(r *protocol.SubmitResult) error {
+	if r.ID == "" {
+		return ErrEmptySubmitID
+	}
+	return nil
+}
+
+// StatusResult checks that a driver status result has required fields.
+func StatusResult(r *protocol.StatusResult) error {
+	if r.ID == "" {
+		return ErrEmptyStatusID
+	}
+	if r.State == "" {
+		return ErrEmptyState
 	}
 	return nil
 }
