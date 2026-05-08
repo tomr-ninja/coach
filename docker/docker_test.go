@@ -643,8 +643,8 @@ func TestImageRemove(t *testing.T) {
 		return
 	}
 	assert.False(t, exists, "image should not exist after removal")
-
 }
+
 func TestImageRemove_Nonexistent(t *testing.T) {
 	_, client := setupDockerPool(t)
 	ctx := context.Background()

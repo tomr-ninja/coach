@@ -18,6 +18,9 @@ var (
 	errNoSubmitResult = errors.New("driver returned no submit result")
 	errNoListResult   = errors.New("driver returned no list result")
 	errNoStatusResult = errors.New("driver returned no status result")
+	errEmptySubmitID  = errors.New("submit result has empty ID")
+	errEmptyStatusID  = errors.New("status result has empty ID")
+	errEmptyState     = errors.New("status result has empty State")
 )
 
 func ScheduleCreate(
@@ -180,6 +183,9 @@ func ScheduleCreate(
 	if result.SubmitResult == nil {
 		return "", errNoSubmitResult
 	}
+	if err := ValidateSubmitResult(result.SubmitResult); err != nil {
+		return "", fmt.Errorf("validate submit result: %w", err)
+	}
 
 	return result.SubmitResult.ID, nil
 }
@@ -258,6 +264,28 @@ func ScheduleStatus(ctx context.Context, backendName, id string) (*protocol.Stat
 	if result.StatusResult == nil {
 		return nil, errNoStatusResult
 	}
+	if err := ValidateStatusResult(result.StatusResult); err != nil {
+		return nil, fmt.Errorf("validate status result: %w", err)
+	}
 
 	return result.StatusResult, nil
+}
+
+func ValidateSubmitResult(r *protocol.SubmitResult) error {
+	if r.ID == "" {
+		return errEmptySubmitID
+	}
+
+	return nil
+}
+
+func ValidateStatusResult(r *protocol.StatusResult) error {
+	if r.ID == "" {
+		return errEmptyStatusID
+	}
+	if r.State == "" {
+		return errEmptyState
+	}
+
+	return nil
 }
