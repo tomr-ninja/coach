@@ -6,6 +6,13 @@ import os
 import sys
 import traceback
 
+from uuid import UUID
+
+from prefect.client.orchestration import get_client
+from prefect.client.schemas.actions import DeploymentScheduleCreate
+from prefect.client.schemas.objects import Flow
+from prefect.client.schemas.schedules import CronSchedule
+
 PROTOCOL_VERSION = 1
 
 VERBOSE = os.environ.get("COACH_VERBOSE") == "1"
@@ -16,11 +23,6 @@ config = json.loads(config_raw)
 api_url = config.get("api_url") or os.environ.get("PREFECT_API_URL", "")
 if api_url:
     os.environ["PREFECT_API_URL"] = api_url
-
-from prefect.client.orchestration import get_client
-from prefect.client.schemas.actions import DeploymentScheduleCreate
-from prefect.client.schemas.objects import Flow
-from prefect.client.schemas.schedules import CronSchedule
 
 
 async def get_or_create_flow(client, flow_name):
@@ -77,10 +79,23 @@ async def submit_job(client, job):
     params = _build_deployment_params(job, flow.id)
     deployment_id = await client.create_deployment(**params)
 
+    # create_deployment returns a UUID in newer Prefect versions.
+    # Convert to plain string safely regardless of return type.
+    if isinstance(deployment_id, UUID):
+        deployment_id_str = str(deployment_id)
+    elif isinstance(deployment_id, str):
+        deployment_id_str = deployment_id
+    else:
+        raise TypeError(
+            f"create_deployment returned unexpected type {type(deployment_id).__name__}, "
+            f"expected UUID or str. Value: {deployment_id!r}"
+        )
+
     if not job.get("isRecurring", False):
+        # Prefect's create_flow_run_from_deployment accepts UUID or str.
         await client.create_flow_run_from_deployment(deployment_id)
 
-    return str(deployment_id)
+    return deployment_id_str
 
 
 async def list_deployments(client):
@@ -106,14 +121,10 @@ async def list_deployments(client):
 
 
 async def delete_deployment(client, run_id):
-    from uuid import UUID
-
     await client.delete_deployment(UUID(str(run_id)))
 
 
 async def deployment_status(client, run_id):
-    from uuid import UUID
-
     deployment = await client.read_deployment(UUID(str(run_id)))
     next_run = ""
     if deployment.schedules:
@@ -176,6 +187,7 @@ def run():
                 return {"success": True, "statusResult": st}
             else:
                 return {"success": False, "error": f"unknown type: {spec_type}"}
+        return None
 
     try:
         result = asyncio.run(execute())
