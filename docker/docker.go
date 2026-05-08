@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/mount"
@@ -67,6 +68,9 @@ func NewClient() (*Client, error) {
 func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {
 	_, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return false, nil
+		}
 		return false, err
 	}
 
@@ -430,6 +434,7 @@ func (c *Client) ListScripts(ctx context.Context, imageName string) ([]string, e
 	})
 
 	if attErr == nil {
+		defer rc.Close()
 		if err := demuxDockerStream(rc, &out); err != nil {
 			return nil, fmt.Errorf("read container logs: %w", err)
 		}

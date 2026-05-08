@@ -129,7 +129,7 @@ func fetchObjectChecksum(ctx context.Context, client *s3.Client, bucket, key str
 
 func parseS3URI(uri string) (bucket, prefix string, err error) {
 	rest := strings.TrimPrefix(uri, "s3://")
-	if rest == uri {
+	if rest == "" || rest == uri {
 		return "", "", fmt.Errorf("%w: %s", errNotS3URI, uri)
 	}
 	bucket, prefix, found := strings.Cut(rest, "/")
