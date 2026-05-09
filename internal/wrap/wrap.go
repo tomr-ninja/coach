@@ -34,7 +34,7 @@ var ErrNoRegistry = fmt.Errorf("registry is required for remote S3 runs (set in 
 // targetPlatform is an optional "os/arch" specifier (e.g., "linux/amd64").
 // When empty, the platform is auto-detected from the locally available base image.
 // The coach-artifact binary is cross-compiled inside a multi-stage Docker build.
-func Image(ctx context.Context, dc *docker.Client, baseImage, _, registry, registryAuth, targetPlatform string, entrypoint []string) (string, error) {
+func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registryAuth, targetPlatform string, entrypoint []string) (string, error) {
 	safeName := SanitizeImageName(baseImage)
 	shortFP := randomSuffix()
 	tag := fmt.Sprintf("coach-wrapped-%s:%s", safeName, shortFP)

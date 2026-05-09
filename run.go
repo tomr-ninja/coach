@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -126,10 +127,36 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 		return artifact.Zero, fmt.Errorf("resolve image digest: %w", err)
 	}
 
+	// Resolve fingerprint from S3 data checksums to detect duplicate runs.
+	dataChecksums, err := storage.Checksums(s3DataSource, cfg)
+	if err != nil {
+		return artifact.Zero, fmt.Errorf("resolve data checksums: %w", err)
+	}
+
+	digestBytes, err := hex.DecodeString(imageDigestHex)
+	if err != nil || len(digestBytes) != 32 {
+		return artifact.Zero, fmt.Errorf("invalid image digest: %w", err)
+	}
+	var imageDigest [32]byte
+	copy(imageDigest[:], digestBytes)
+
+	fingerprint := artifact.Fingerprint(imageDigest, dataChecksums)
+	fingerprintHex := fmt.Sprintf("%x", fingerprint)
+
 	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
 	s3PathOutPrefix := strings.TrimPrefix(s3OutputDir, "s3://")
 	if !strings.HasSuffix(s3PathOutPrefix, "/") {
 		s3PathOutPrefix += "/"
+	}
+
+	if !force {
+		exists, err := storage.ArtifactExists(ctx, cfg, s3PathOutPrefix+fingerprintHex)
+		if err != nil {
+			return artifact.Zero, fmt.Errorf("check artifact exists: %w", err)
+		}
+		if exists {
+			return artifact.Zero, fmt.Errorf("%w: s3://%s%s", artifact.ErrExists, s3PathOutPrefix, fingerprintHex)
+		}
 	}
 
 	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
@@ -137,7 +164,7 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 		return artifact.Zero, err
 	}
 
-	return artifact.Zero, nil
+	return fingerprint, nil
 }
 
 // ResolveChecksums resolves data checksums for either a local path or an S3 URI.
@@ -209,7 +236,7 @@ func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage, imageD
 		return fmt.Errorf("inspect image entrypoint: %w", err)
 	}
 
-	wrappedImage, err := wrap.Image(ctx, client, modelImage, imageDigestHex, "", "", "", entrypoint)
+	wrappedImage, err := wrap.Image(ctx, client, modelImage, "", "", "", entrypoint)
 	if err != nil {
 		return fmt.Errorf("wrap image: %w", err)
 	}

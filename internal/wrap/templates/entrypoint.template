@@ -16,6 +16,8 @@ set +e
 APP_EXIT_CODE=$?
 
 echo "--- Phase 3: Uploading output to S3 ---"
-coach-artifact upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"
+if ! coach-artifact upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"; then
+  echo "WARNING: S3 upload failed (exit code $?), preserving application exit code $APP_EXIT_CODE" >&2
+fi
 
 exit $APP_EXIT_CODE

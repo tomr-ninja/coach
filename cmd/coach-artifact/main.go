@@ -88,8 +88,7 @@ func cmdFetch(args []string) {
 
 	fmt.Fprintf(os.Stderr, "Fetching data from s3://%s/%s...\n", bucket, prefix)
 
-	// Fetch filter files from S3 first.
-	includeSet := fetchFilterFile(ctx, s3Client, bucket, prefix, ".coachinclude")
+	// Fetch ignore file from S3 first.
 	ignoreSet := fetchFilterFile(ctx, s3Client, bucket, prefix, ".coachignore")
 
 	// List and download S3 objects.
@@ -114,15 +113,11 @@ func cmdFetch(args []string) {
 			rel := strings.TrimPrefix(key, prefix)
 			rel = strings.TrimPrefix(rel, "/")
 
-			if rel == ".coachinclude" || rel == ".coachignore" {
+			if rel == ".coachignore" {
 				continue
 			}
 
-			// Apply filters.
-			if len(includeSet) > 0 && !includeSet[rel] {
-				fmt.Fprintf(os.Stderr, "  skip (not in include): %s\n", rel)
-				continue
-			}
+			// Apply ignore filter.
 			if ignoreSet[rel] {
 				fmt.Fprintf(os.Stderr, "  skip (ignored): %s\n", rel)
 				continue

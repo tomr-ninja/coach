@@ -182,7 +182,7 @@ func wrapModelForS3Schedule(
 		return protocol.Model{}, "", fmt.Errorf("inspect image entrypoint: %w", err)
 	}
 
-	wrappedImage, err := wrap.Image(ctx, client, modelImage, imageDigestHex, cfg.Registry, cfg.RegistryAuth.Reveal(), targetPlatform, entrypoint)
+	wrappedImage, err := wrap.Image(ctx, client, modelImage, cfg.Registry, cfg.RegistryAuth.Reveal(), targetPlatform, entrypoint)
 	if err != nil {
 		return protocol.Model{}, "", fmt.Errorf("wrap image: %w", err)
 	}
