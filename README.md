@@ -46,8 +46,7 @@ Useful examples of scripts may be 'fetch-data', 'convert-artifact', 'evaluate', 
 
 Data is a set of files. Every file is considered a chunk. Every chunk is represented by its SHA256 checksum.
 
-You can use .coachignore file to exclude some files from the data set (blacklisting), or .coachinclude file to only
-include some files (whitelisting). If both files exist, only .coachinclude will be used.
+You can use .coachignore file to exclude some files from the data set (blacklisting).
 
 ### Artifact
 

@@ -22,17 +22,13 @@ var (
 
 // CollectChecksums walks a local data directory and computes SHA256
 // checksums for every file. Files listed in .coachignore are skipped.
-// If .coachinclude exists, only listed files are included.
 func CollectChecksums(dataDir string) ([][32]byte, error) {
-	includeFile := filepath.Join(dataDir, ".coachinclude")
 	ignoreFile := filepath.Join(dataDir, ".coachignore")
 
-	useWhitelist := false
-	var whitelist map[string]bool
-	if _, err := os.Stat(includeFile); err == nil {
-		useWhitelist = true
-		whitelist = make(map[string]bool)
-		f, err := os.Open(includeFile)
+	var blacklist map[string]bool
+	if _, err := os.Stat(ignoreFile); err == nil {
+		blacklist = make(map[string]bool)
+		f, err := os.Open(ignoreFile)
 		if err != nil {
 			return nil, err
 		}
@@ -41,33 +37,11 @@ func CollectChecksums(dataDir string) ([][32]byte, error) {
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
-				whitelist[line] = true
+				blacklist[line] = true
 			}
 		}
 		if err := scanner.Err(); err != nil {
 			return nil, err
-		}
-	}
-
-	var blacklist map[string]bool
-	if !useWhitelist {
-		if _, err := os.Stat(ignoreFile); err == nil {
-			blacklist = make(map[string]bool)
-			f, err := os.Open(ignoreFile)
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if line != "" {
-					blacklist[line] = true
-				}
-			}
-			if err := scanner.Err(); err != nil {
-				return nil, err
-			}
 		}
 	}
 
@@ -85,15 +59,11 @@ func CollectChecksums(dataDir string) ([][32]byte, error) {
 			return err
 		}
 
-		if rel == ".coachinclude" || rel == ".coachignore" {
+		if rel == ".coachignore" {
 			return nil
 		}
 
-		if useWhitelist {
-			if !whitelist[rel] {
-				return nil
-			}
-		} else if blacklist[rel] {
+		if blacklist[rel] {
 			return nil
 		}
 

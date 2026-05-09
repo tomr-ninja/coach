@@ -55,19 +55,6 @@ func TestCollectChecksums(t *testing.T) {
 		assert.Equal(t, want, got[0])
 	})
 
-	t.Run("coachinclude whitelist", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, ".coachinclude"), []byte("a.txt\n"), 0o644))
-
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		want := sha256.Sum256([]byte("a"))
-		assert.Equal(t, want, got[0])
-	})
-
 	t.Run("ignores meta files", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte("x"), 0o644))
