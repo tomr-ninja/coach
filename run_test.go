@@ -108,13 +108,13 @@ func TestBuildS3ContainerEnv(t *testing.T) {
 		},
 	}
 
-	got := buildS3ContainerEnv(cfg, "bucket/data", "bucket/output/abcd1234")
+	got := s3WrapperEnvVars(cfg, "bucket/data", "bucket/output/", "abc123")
 
 	assert.Equal(t, "bucket/data", got["S3_PATH_IN"])
-	assert.Equal(t, "bucket/output/abcd1234", got["S3_PATH_OUT"])
-	assert.Equal(t, "s3", got["RCLONE_CONFIG_S3_TYPE"])
-	assert.Equal(t, "key", got["RCLONE_CONFIG_S3_ACCESS_KEY_ID"])
-	assert.Equal(t, "secret", got["RCLONE_CONFIG_S3_SECRET_ACCESS_KEY"])
-	assert.Equal(t, "us-west-2", got["RCLONE_CONFIG_S3_REGION"])
-	assert.Equal(t, "http://minio:9000", got["RCLONE_CONFIG_S3_ENDPOINT"])
+	assert.Equal(t, "bucket/output/", got["S3_PATH_OUT_PREFIX"])
+	assert.Equal(t, "abc123", got["COACH_IMAGE_DIGEST"])
+	assert.Equal(t, "key", got["AWS_ACCESS_KEY_ID"])
+	assert.Equal(t, "secret", got["AWS_SECRET_ACCESS_KEY"])
+	assert.Equal(t, "us-west-2", got["AWS_REGION"])
+	assert.Equal(t, "http://minio:9000", got["AWS_ENDPOINT_URL"])
 }

@@ -130,22 +130,6 @@ func ParsePathOut(path string) (bucket, prefix string, err error) {
 	return bucket, prefix, nil
 }
 
-// BuildEnvVars converts an S3Config into rclone environment variables.
-func BuildEnvVars(s3 config.S3Config) map[string]string {
-	provider := s3.Provider
-	if provider == "" {
-		provider = "AWS"
-	}
-	return map[string]string{
-		"RCLONE_CONFIG_S3_TYPE":              "s3",
-		"RCLONE_CONFIG_S3_PROVIDER":          provider,
-		"RCLONE_CONFIG_S3_ACCESS_KEY_ID":     s3.AccessKeyID.Reveal(),
-		"RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": s3.SecretAccessKey.Reveal(),
-		"RCLONE_CONFIG_S3_REGION":            s3.Region,
-		"RCLONE_CONFIG_S3_ENDPOINT":          s3.Endpoint,
-	}
-}
-
 // fetchObjectChecksum retrieves the SHA-256 checksum of an S3 object via HeadObject.
 func fetchObjectChecksum(ctx context.Context, client *s3.Client, bucket, key string) ([32]byte, bool) {
 	resp, err := client.HeadObject(ctx, &s3.HeadObjectInput{

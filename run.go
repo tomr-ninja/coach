@@ -121,44 +121,23 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 	}
 	defer client.Close()
 
-	if utils.IsVerbose(ctx) {
-		fmt.Fprintf(os.Stderr, "resolving S3 checksums...\n")
-	}
-	checksums, err := ResolveChecksums(s3DataSource, cfg)
+	imageDigestHex, err := resolveImageDigestHex(ctx, client, modelImage)
 	if err != nil {
-		return artifact.Zero, fmt.Errorf("resolve checksums: %w", err)
+		return artifact.Zero, fmt.Errorf("resolve image digest: %w", err)
 	}
-
-	fingerprint, err := resolveFingerprint(ctx, client, modelImage, checksums)
-	if err != nil {
-		return artifact.Zero, err
-	}
-
-	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 
 	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
-	s3PathOut := strings.TrimPrefix(s3OutputDir, "s3://")
-	if !strings.HasSuffix(s3PathOut, "/") {
-		s3PathOut += "/"
-	}
-	s3PathOut += fingerprintHex
-
-	if !force {
-		exists, err := storage.ArtifactExists(ctx, cfg, s3PathOut)
-		if err != nil {
-			return artifact.Zero, fmt.Errorf("check s3 artifact: %w", err)
-		}
-		if exists {
-			return artifact.Zero, fmt.Errorf("%w: s3://%s", artifact.ErrExists, s3PathOut)
-		}
+	s3PathOutPrefix := strings.TrimPrefix(s3OutputDir, "s3://")
+	if !strings.HasSuffix(s3PathOutPrefix, "/") {
+		s3PathOutPrefix += "/"
 	}
 
-	envVars := buildS3ContainerEnv(cfg, s3PathIn, s3PathOut)
-	if err := wrapAndRunS3(ctx, client, modelImage, fingerprint, envVars); err != nil {
+	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
+	if err := wrapAndRunS3(ctx, client, modelImage, imageDigestHex, envVars); err != nil {
 		return artifact.Zero, err
 	}
 
-	return fingerprint, nil
+	return artifact.Zero, nil
 }
 
 // ResolveChecksums resolves data checksums for either a local path or an S3 URI.
@@ -207,22 +186,30 @@ func resolveArtifactDir(ctx context.Context, client *docker.Client, modelImage s
 	return fingerprint, artifactsDir, nil
 }
 
-func buildS3ContainerEnv(cfg *config.Config, s3PathIn, s3PathOut string) map[string]string {
-	envVars := storage.BuildEnvVars(cfg.S3)
-	envVars["S3_PATH_IN"] = s3PathIn
-	envVars["S3_PATH_OUT"] = s3PathOut
-
+// s3WrapperEnvVars builds env vars for an S3 wrapper container.
+func s3WrapperEnvVars(cfg *config.Config, s3PathIn, s3PathOutPrefix, imageDigestHex string) map[string]string {
+	s3 := cfg.S3
+	envVars := map[string]string{
+		"S3_PATH_IN":            s3PathIn,
+		"S3_PATH_OUT_PREFIX":    s3PathOutPrefix,
+		"COACH_IMAGE_DIGEST":    imageDigestHex,
+		"AWS_ACCESS_KEY_ID":     s3.AccessKeyID.Reveal(),
+		"AWS_SECRET_ACCESS_KEY": s3.SecretAccessKey.Reveal(),
+		"AWS_REGION":            s3.Region,
+	}
+	if s3.Endpoint != "" {
+		envVars["AWS_ENDPOINT_URL"] = s3.Endpoint
+	}
 	return envVars
 }
 
-func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage string, fingerprint [32]byte, envVars map[string]string) error {
+func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage, imageDigestHex string, envVars map[string]string) error {
 	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
 	if err != nil {
 		return fmt.Errorf("inspect image entrypoint: %w", err)
 	}
 
-	fingerprintHex := fmt.Sprintf("%x", fingerprint)
-	wrappedImage, err := wrap.Image(ctx, client, modelImage, fingerprintHex, "", "", "", entrypoint)
+	wrappedImage, err := wrap.Image(ctx, client, modelImage, imageDigestHex, "", "", "", entrypoint)
 	if err != nil {
 		return fmt.Errorf("wrap image: %w", err)
 	}

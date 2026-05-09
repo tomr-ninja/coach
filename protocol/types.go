@@ -10,7 +10,7 @@ type Spec struct {
 }
 
 type Job struct {
-	Fingerprint string            `json:"fingerprint"`
+	ImageDigest string            `json:"imageDigest"`
 	Name        string            `json:"name"`
 	IsWrapped   bool              `json:"isWrapped"`
 	IsRecurring bool              `json:"isRecurring"`

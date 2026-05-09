@@ -5,17 +5,17 @@ DATA_DIR="/data"
 OUTPUT_DIR="/output"
 mkdir -p "$DATA_DIR" "$OUTPUT_DIR"
 
-echo "--- Phase 1: Syncing from S3 ($S3_PATH_IN) ---"
-rclone copy "s3:$S3_PATH_IN" "$DATA_DIR" --verbose
+echo "--- Phase 1: Fetching data and computing fingerprint ---"
+FP=$(coach-artifact fetch --source "s3://${S3_PATH_IN}" --digest "$COACH_IMAGE_DIGEST" "$DATA_DIR")
+S3_PATH_OUT="${S3_PATH_OUT_PREFIX}${FP}"
+echo "Fingerprint: $FP"
 
 echo "--- Phase 2: Running Application ---"
 set +e
 {{.RunCommand}}
 APP_EXIT_CODE=$?
 
-echo "--- Phase 3: Syncing to S3 ($S3_PATH_OUT) ---"
-if ! rclone copy "$OUTPUT_DIR" "s3:$S3_PATH_OUT" --verbose; then
-  echo "WARNING: S3 upload failed (exit code $?), but preserving application exit code $APP_EXIT_CODE" >&2
-fi
+echo "--- Phase 3: Uploading output to S3 ---"
+coach-artifact upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"
 
 exit $APP_EXIT_CODE

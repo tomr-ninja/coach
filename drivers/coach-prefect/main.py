@@ -44,7 +44,7 @@ def _build_deployment_params(job, flow_id):
         "name": job["name"],
         "tags": list(labels.values()) if labels else [],
         "parameters": {
-            "fingerprint": job["fingerprint"],
+            "imageDigest": job["imageDigest"],
             "model": model,
             "data": job["data"],
             "output": job["output"],

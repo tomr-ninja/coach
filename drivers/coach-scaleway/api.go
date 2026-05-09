@@ -246,6 +246,6 @@ func buildJobDefinition(job *protocol.Job, projectID string) (jobDefinitionReque
 		StartupCommand:       startupCmd,
 		EnvironmentVariables: env,
 		CronSchedule:         cronReq,
-		Description:          job.Fingerprint,
+		Description:          job.ImageDigest,
 	}, nil
 }

@@ -9,7 +9,7 @@ import (
 
 // BuildJobParams holds the inputs needed to assemble a protocol.Job.
 type BuildJobParams struct {
-	Fingerprint  string
+	ImageDigest  string
 	ModelImage   string
 	DataSource   string
 	OutputURI    string
@@ -24,7 +24,7 @@ type BuildJobParams struct {
 func BuildJob(p BuildJobParams) *protocol.Job {
 	name := fmt.Sprintf("coach-container-runner-%s", wrap.SanitizeImageName(p.ModelImage))
 	job := &protocol.Job{
-		Fingerprint: p.Fingerprint,
+		ImageDigest: p.ImageDigest,
 		Name:        name,
 		IsRecurring: p.ScheduleCron != "",
 		IsWrapped:   p.Wrapped,

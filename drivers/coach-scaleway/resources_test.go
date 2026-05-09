@@ -48,7 +48,7 @@ func TestDefaultIfZero(t *testing.T) {
 func TestBuildJobDefinition(t *testing.T) {
 	job := &protocol.Job{
 		Name:        "test-job",
-		Fingerprint: "abc123",
+		ImageDigest: "abc123",
 		Model: protocol.Model{
 			Image:   "myimage:latest",
 			Command: []string{"python", "train.py"},

@@ -11,7 +11,7 @@ import (
 
 func TestBuildJob_OneOff(t *testing.T) {
 	p := BuildJobParams{
-		Fingerprint:  "abc123",
+		ImageDigest:  "abc123",
 		ModelImage:   "registry.io/my/model:v1",
 		DataSource:   "/data",
 		OutputURI:    "/output",
@@ -31,7 +31,7 @@ func TestBuildJob_OneOff(t *testing.T) {
 	job := BuildJob(p)
 
 	require.NotNil(t, job)
-	assert.Equal(t, "abc123", job.Fingerprint)
+	assert.Equal(t, "abc123", job.ImageDigest)
 	assert.Equal(t, "coach-container-runner-model-v1", job.Name)
 	assert.False(t, job.IsRecurring)
 	assert.False(t, job.IsWrapped)
@@ -49,7 +49,7 @@ func TestBuildJob_OneOff(t *testing.T) {
 
 func TestBuildJob_Recurring(t *testing.T) {
 	p := BuildJobParams{
-		Fingerprint:  "def456",
+		ImageDigest:  "def456",
 		ModelImage:   "ubuntu:22.04",
 		DataSource:   "s3://bucket/data",
 		OutputURI:    "s3://bucket/output",
@@ -70,7 +70,7 @@ func TestBuildJob_Recurring(t *testing.T) {
 	job := BuildJob(p)
 
 	require.NotNil(t, job)
-	assert.Equal(t, "def456", job.Fingerprint)
+	assert.Equal(t, "def456", job.ImageDigest)
 	assert.Equal(t, "coach-container-runner-ubuntu-22.04", job.Name)
 	assert.True(t, job.IsRecurring)
 	assert.True(t, job.IsWrapped)
@@ -88,7 +88,7 @@ func TestBuildJob_Recurring(t *testing.T) {
 func TestBuildJob_SanitizedImageName(t *testing.T) {
 	// Image names with special characters should be sanitized
 	p := BuildJobParams{
-		Fingerprint:  "fp",
+		ImageDigest:  "fp",
 		ModelImage:   "registry.io/team/my-image:v1.0.0",
 		DataSource:   "/data",
 		OutputURI:    "/output",
@@ -105,7 +105,7 @@ func TestBuildJob_SanitizedImageName(t *testing.T) {
 func TestBuildJob_EmptyModel(t *testing.T) {
 	// BuildJob should work even with minimal inputs
 	p := BuildJobParams{
-		Fingerprint: "minimal",
+		ImageDigest: "minimal",
 		ModelImage:  "img:latest",
 		DataSource:  "/d",
 		OutputURI:   "/o",
@@ -115,7 +115,7 @@ func TestBuildJob_EmptyModel(t *testing.T) {
 	}
 
 	job := BuildJob(p)
-	assert.Equal(t, "minimal", job.Fingerprint)
+	assert.Equal(t, "minimal", job.ImageDigest)
 	assert.Equal(t, "coach-container-runner-img-latest", job.Name)
 	assert.False(t, job.IsRecurring)
 	assert.Nil(t, job.Schedule)

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/tomr-ninja/coach/docker"
-	"github.com/tomr-ninja/coach/internal/artifact"
 	"github.com/tomr-ninja/coach/internal/config"
 	"github.com/tomr-ninja/coach/internal/driver"
 	"github.com/tomr-ninja/coach/internal/schedule"
@@ -70,11 +69,10 @@ func ScheduleCreate(
 	}
 	defer client.Close()
 
-	fingerprint, err := resolveScheduleFingerprint(ctx, client, modelImage, dataSource, cfg, backend.Platform)
+	imageDigestHex, err := resolveImageDigestHex(ctx, client, modelImage)
 	if err != nil {
 		return "", err
 	}
-	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 
 	if err := validate.LocalVsS3(dataSource, outputURI); err != nil {
 		return "", err
@@ -85,7 +83,7 @@ func ScheduleCreate(
 	var wrappedImage string
 
 	if wrapped {
-		model, wrappedImage, err = wrapModelForS3(ctx, client, modelImage, fingerprintHex, dataSource, outputURI, cfg, command, script, backend.Platform)
+		model, wrappedImage, err = wrapModelForS3Schedule(ctx, client, modelImage, imageDigestHex, dataSource, outputURI, cfg, command, script, backend.Platform)
 		if err != nil {
 			return "", err
 		}
@@ -98,7 +96,7 @@ func ScheduleCreate(
 	}
 
 	job := schedule.BuildJob(schedule.BuildJobParams{
-		Fingerprint:  fingerprintHex,
+		ImageDigest:  imageDigestHex,
 		ModelImage:   modelImage,
 		DataSource:   dataSource,
 		OutputURI:    outputURI,
@@ -134,35 +132,34 @@ func ScheduleCreate(
 	return result.SubmitResult.ID, nil
 }
 
-// resolveScheduleFingerprint checks the image exists locally, resolves its digest
-// and data checksums, then computes the combined artifact fingerprint.
-func resolveScheduleFingerprint(ctx context.Context, client *docker.Client, modelImage, dataSource string, cfg *config.Config, platform string) ([32]byte, error) {
+// resolveImageDigestHex checks the image exists locally and returns its SHA256 digest as a hex string.
+func resolveImageDigestHex(ctx context.Context, client *docker.Client, modelImage string) (string, error) {
 	exists, err := client.ImageExists(ctx, modelImage)
 	if err != nil {
-		return artifact.Zero, fmt.Errorf("check image exists: %w", err)
+		return "", fmt.Errorf("check image exists: %w", err)
 	}
 	if !exists {
-		return artifact.Zero, fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
+		return "", fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
 	}
 
-	digest, err := client.EnsureImageDigest(ctx, modelImage, platform)
+	digest, err := client.EnsureImageDigest(ctx, modelImage, "")
 	if err != nil {
-		return artifact.Zero, fmt.Errorf("image digest: %w", err)
+		return "", fmt.Errorf("image digest: %w", err)
 	}
 
-	checksums, err := ResolveChecksums(dataSource, cfg)
-	if err != nil {
-		return artifact.Zero, fmt.Errorf("resolve checksums: %w", err)
-	}
-
-	return artifact.Fingerprint(digest, checksums), nil
+	return fmt.Sprintf("%x", digest), nil
 }
 
-// wrapModelForS3 builds an S3 wrapper image and returns the wrapped Model plus the image tag.
-func wrapModelForS3(
+// wrapModelForS3Schedule builds an S3 wrapper image for a scheduled job.
+//
+// Unlike the one-off Run path, this does NOT pre-compute the artifact fingerprint.
+// Instead it passes imageDigestHex and S3_PATH_OUT_PREFIX as env vars. The wrapper
+// entrypoint computes the fingerprint from the actual data at execution time and
+// appends it to S3_PATH_OUT_PREFIX.
+func wrapModelForS3Schedule(
 	ctx context.Context,
 	client *docker.Client,
-	modelImage, fingerprintHex, dataSource, outputURI string,
+	modelImage, imageDigestHex, dataSource, outputURI string,
 	cfg *config.Config,
 	command []string,
 	script string,
@@ -173,20 +170,19 @@ func wrapModelForS3(
 	}
 
 	s3PathIn := strings.TrimPrefix(dataSource, "s3://")
-	s3PathOut := strings.TrimPrefix(outputURI, "s3://")
-	if !strings.HasSuffix(s3PathOut, "/") {
-		s3PathOut += "/"
+	s3PathOutPrefix := strings.TrimPrefix(outputURI, "s3://")
+	if !strings.HasSuffix(s3PathOutPrefix, "/") {
+		s3PathOutPrefix += "/"
 	}
-	s3PathOut += fingerprintHex
 
-	envVars := buildS3ContainerEnv(cfg, s3PathIn, s3PathOut)
+	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
 
 	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
 	if err != nil {
 		return protocol.Model{}, "", fmt.Errorf("inspect image entrypoint: %w", err)
 	}
 
-	wrappedImage, err := wrap.Image(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth.Reveal(), targetPlatform, entrypoint)
+	wrappedImage, err := wrap.Image(ctx, client, modelImage, imageDigestHex, cfg.Registry, cfg.RegistryAuth.Reveal(), targetPlatform, entrypoint)
 	if err != nil {
 		return protocol.Model{}, "", fmt.Errorf("wrap image: %w", err)
 	}
