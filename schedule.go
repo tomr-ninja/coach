@@ -70,7 +70,7 @@ func ScheduleCreate(
 	}
 	defer client.Close()
 
-	fingerprint, err := resolveScheduleFingerprint(ctx, client, modelImage, dataSource, cfg)
+	fingerprint, err := resolveScheduleFingerprint(ctx, client, modelImage, dataSource, cfg, backend.Platform)
 	if err != nil {
 		return "", err
 	}
@@ -85,7 +85,7 @@ func ScheduleCreate(
 	var wrappedImage string
 
 	if wrapped {
-		model, wrappedImage, err = wrapModelForS3(ctx, client, modelImage, fingerprintHex, dataSource, outputURI, cfg, command, script)
+		model, wrappedImage, err = wrapModelForS3(ctx, client, modelImage, fingerprintHex, dataSource, outputURI, cfg, command, script, backend.Platform)
 		if err != nil {
 			return "", err
 		}
@@ -136,7 +136,7 @@ func ScheduleCreate(
 
 // resolveScheduleFingerprint checks the image exists locally, resolves its digest
 // and data checksums, then computes the combined artifact fingerprint.
-func resolveScheduleFingerprint(ctx context.Context, client *docker.Client, modelImage, dataSource string, cfg *config.Config) ([32]byte, error) {
+func resolveScheduleFingerprint(ctx context.Context, client *docker.Client, modelImage, dataSource string, cfg *config.Config, platform string) ([32]byte, error) {
 	exists, err := client.ImageExists(ctx, modelImage)
 	if err != nil {
 		return artifact.Zero, fmt.Errorf("check image exists: %w", err)
@@ -145,7 +145,7 @@ func resolveScheduleFingerprint(ctx context.Context, client *docker.Client, mode
 		return artifact.Zero, fmt.Errorf("%w: %s", errImageNotLocal, modelImage)
 	}
 
-	digest, err := client.EnsureImageDigest(ctx, modelImage)
+	digest, err := client.EnsureImageDigest(ctx, modelImage, platform)
 	if err != nil {
 		return artifact.Zero, fmt.Errorf("image digest: %w", err)
 	}
@@ -166,6 +166,7 @@ func wrapModelForS3(
 	cfg *config.Config,
 	command []string,
 	script string,
+	targetPlatform string,
 ) (protocol.Model, string, error) {
 	if cfg.Registry == "" {
 		return protocol.Model{}, "", wrap.ErrNoRegistry
@@ -185,7 +186,7 @@ func wrapModelForS3(
 		return protocol.Model{}, "", fmt.Errorf("inspect image entrypoint: %w", err)
 	}
 
-	wrappedImage, err := wrap.Image(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth.Reveal(), entrypoint)
+	wrappedImage, err := wrap.Image(ctx, client, modelImage, fingerprintHex, cfg.Registry, cfg.RegistryAuth.Reveal(), targetPlatform, entrypoint)
 	if err != nil {
 		return protocol.Model{}, "", fmt.Errorf("wrap image: %w", err)
 	}

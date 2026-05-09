@@ -185,7 +185,7 @@ func ResolveChecksums(source string, cfg *config.Config) ([][32]byte, error) {
 }
 
 func resolveFingerprint(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte) ([32]byte, error) {
-	digest, err := client.EnsureImageDigest(ctx, modelImage)
+	digest, err := client.EnsureImageDigest(ctx, modelImage, "")
 	if err != nil {
 		return artifact.Zero, fmt.Errorf("image digest: %w", err)
 	}
@@ -222,7 +222,7 @@ func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage string,
 	}
 
 	fingerprintHex := fmt.Sprintf("%x", fingerprint)
-	wrappedImage, err := wrap.Image(ctx, client, modelImage, fingerprintHex, "", "", entrypoint)
+	wrappedImage, err := wrap.Image(ctx, client, modelImage, fingerprintHex, "", "", "", entrypoint)
 	if err != nil {
 		return fmt.Errorf("wrap image: %w", err)
 	}

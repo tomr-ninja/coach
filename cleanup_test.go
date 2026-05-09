@@ -39,7 +39,7 @@ RUN echo "cleanup test %s" > /test.txt
 
 	tag = fmt.Sprintf("coach-wrapped-test-cleanup-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err, "build should succeed")
 
 	cleanup = func() {

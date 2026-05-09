@@ -26,7 +26,10 @@ var (
 var ErrNoRegistry = fmt.Errorf("registry is required for remote S3 runs (set in coach.json)")
 
 // Image builds a wrapper Docker image on top of the base model image.
-func Image(ctx context.Context, dc *docker.Client, baseImage, fingerprint, registry, registryAuth string, entrypoint []string) (string, error) {
+//
+// targetPlatform is an optional "os/arch" specifier (e.g., "linux/amd64").
+// When empty, the platform is auto-detected from the locally available base image.
+func Image(ctx context.Context, dc *docker.Client, baseImage, fingerprint, registry, registryAuth, targetPlatform string, entrypoint []string) (string, error) {
 	safeName := SanitizeImageName(baseImage)
 	shortFP := fingerprint
 	if len(shortFP) > 12 {
@@ -89,7 +92,22 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, fingerprint, regis
 	if utils.IsVerbose(ctx) {
 		fmt.Fprintf(os.Stderr, "building wrapper image %s...\n", tag)
 	}
-	if err := dc.ImageBuild(ctx, buildCtx, tag); err != nil {
+	if targetPlatform == "" {
+		var err error
+		targetPlatform, err = dc.ImagePlatform(ctx, baseImage)
+		if err != nil {
+			return "", fmt.Errorf("get image platform: %w", err)
+		}
+	} else {
+		localPlatform, err := dc.ImagePlatform(ctx, baseImage)
+		if err == nil && localPlatform != targetPlatform {
+			fmt.Fprintf(os.Stderr, "warning: backend platform is %s, but local base image is %s. "+
+				"Docker will pull the %s variant during build. "+
+				"If the image doesn't support %s, the build will fail.\n",
+				targetPlatform, localPlatform, targetPlatform, targetPlatform)
+		}
+	}
+	if err := dc.ImageBuild(ctx, buildCtx, tag, targetPlatform); err != nil {
 		return "", fmt.Errorf("build image: %w", err)
 	}
 

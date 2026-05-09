@@ -45,8 +45,9 @@ type Config struct {
 }
 
 type Backend struct {
-	Driver string          `json:"driver"`
-	Config json.RawMessage `json:"config,omitempty"`
+	Driver   string          `json:"driver"`
+	Config   json.RawMessage `json:"config,omitempty"`
+	Platform string          `json:"platform,omitempty"` // target platform for wrapper images, e.g., "linux/amd64"
 }
 
 func LoadConfig() (*Config, error) {

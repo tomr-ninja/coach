@@ -112,6 +112,7 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
   "backends": {
     "prefect": {
       "driver": "coach-prefect",
+      "platform": "linux/amd64",
       "config": {
         "api_key": "$PREFECT_API_KEY",
         "workspace": "ml-training"
@@ -132,6 +133,7 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
 - `registryAuth` — registry auth string (format: `username:password`). Only needed for remote backends.
 - `backends` — backend definitions. Each backend has:
   - `driver` — path or name of the driver executable (must be on `$PATH` or absolute)
+  - `platform` — (optional) target platform for wrapper images, e.g. `"linux/amd64"`. When set, the wrapper is built for this platform regardless of your local Docker daemon's default. When omitted, Coach auto-detects the platform from the locally available base image.
   - `config` — arbitrary JSON passed to the driver via `COACH_BACKEND_CONFIG` env var
 - `defaultBackend` — used when `--backend` is omitted
 - `s3` — S3 credentials for both checksum resolution and container data sync:
@@ -222,6 +224,47 @@ in `coach.json`, which are converted to `RCLONE_CONFIG_S3_*` env vars and inject
 - `registryAuth` in `coach.json` with registry credentials in `username:password` format (optional, only for private registries)
 - `s3` block in `coach.json` with S3 credentials
 - Docker daemon accessible for building and pushing the wrapper image
+
+#### Target platform
+
+When building a wrapper, Coach needs to know which CPU architecture to build for.
+By default, it auto-detects the platform from the locally available base image.
+
+If you're on an Apple Silicon Mac (ARM64) but your cloud backend runs on AMD64, set `platform`
+in your backend config:
+
+```json
+{
+  "backends": {
+    "scaleway": {
+      "driver": "coach-scaleway",
+      "platform": "linux/amd64",
+      "config": { … }
+    }
+  }
+}
+```
+
+This tells Coach to build the wrapper for `linux/amd64` even if your Docker daemon
+prefers ARM64. The same platform is used when pulling the base image (if a pull is needed).
+
+When `platform` is omitted or empty, Coach inspects the base image that's already on
+your machine and builds the wrapper for the same architecture — this is correct when
+your local Docker and the backend share the same platform, or for local-only runs.
+
+If you set `platform` but your locally pulled base image is a different architecture,
+Coach prints a warning but proceeds with the build. Docker will pull the correct
+platform variant of the base image during the build (assuming the image is multi-arch).
+If the image has no variant matching the configured platform, the build fails with
+an error from Docker.
+
+To pull the base image for a specific platform ahead of time:
+
+```shell
+docker pull --platform linux/amd64 my-model:v1
+```
+
+You still need to specify `--platform=...` manually when building the original image.
 
 #### Example
 

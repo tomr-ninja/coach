@@ -167,7 +167,7 @@ RUN echo "test image ready"
 	tag := fmt.Sprintf("coach-test-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
 
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err, "build should succeed")
 
 	return tag
@@ -195,7 +195,7 @@ func TestEnsureImageDigest(t *testing.T) {
 	tag := buildTestImage(t, client)
 	ctx := context.Background()
 
-	digest, err := client.EnsureImageDigest(ctx, tag)
+	digest, err := client.EnsureImageDigest(ctx, tag, "")
 	require.NoError(t, err)
 	assert.NotEqual(t, [32]byte{}, digest, "digest should not be zero")
 }
@@ -257,7 +257,7 @@ CMD ["sh", "-c", "cp /data/input.txt /output/result.txt"]
 
 	tag := fmt.Sprintf("coach-test-copy-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	return tag
@@ -281,7 +281,7 @@ CMD ["sh", "-c", "echo $TEST_VAR"]
 
 	tag := fmt.Sprintf("coach-test-wrap-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	envVars := map[string]string{
@@ -325,7 +325,7 @@ CMD ["sh"]
 
 	tag := fmt.Sprintf("coach-test-script-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "input.txt"), []byte("script_data"), 0o644))
@@ -360,7 +360,7 @@ CMD ["sh"]
 
 	tag := fmt.Sprintf("coach-test-list-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	scripts, err := client.ListScripts(ctx, tag)
@@ -388,7 +388,7 @@ COPY nonexistent_file.txt /app/
 	tag := fmt.Sprintf("coach-test-fail-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
 
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.Error(t, err, "build with missing file should fail")
 	assert.Contains(t, err.Error(), "build image", "error should be wrapped as build error")
 }
@@ -442,7 +442,7 @@ CMD ["sh", "-c", "echo 'failing!' >&2; exit 1"]
 
 	tag := fmt.Sprintf("coach-test-exit-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	err = client.Run(ctx, tag, dataDir, outputDir)
@@ -564,7 +564,7 @@ CMD ["sh", "-c", "cat /data/input.txt | tr '[:lower:]' '[:upper:]' > /output/res
 
 	tag := fmt.Sprintf("coach-test-iso-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = coachClient.ImageBuild(ctx, buildCtx, tag)
+	err = coachClient.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	err = coachClient.Run(ctx, tag, dataDir, outputDir)
@@ -595,14 +595,14 @@ RUN echo "build 1" > /version.txt
 	ctx := context.Background()
 
 	// First build
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	// Second build with same tag - should overwrite
 	buildCtx2, err := BuildContextDir(tmpDir)
 	require.NoError(t, err)
 
-	err = client.ImageBuild(ctx, buildCtx2, tag)
+	err = client.ImageBuild(ctx, buildCtx2, tag, "")
 	require.NoError(t, err, "rebuilding with same tag should succeed")
 
 	exists, err := client.ImageExists(ctx, tag)
@@ -615,7 +615,7 @@ func TestEnsureImageDigest_PullsIfAbsent(t *testing.T) {
 
 	// Use a tiny public image that we likely don't have locally
 	ctx := context.Background()
-	digest, err := client.EnsureImageDigest(ctx, "alpine:3.21")
+	digest, err := client.EnsureImageDigest(ctx, "alpine:3.21", "")
 	require.NoError(t, err)
 	assert.NotEqual(t, [32]byte{}, digest, "should return a digest for alpine:3.21")
 }
@@ -682,7 +682,7 @@ RUN echo "wrapped test" > /test.txt
 
 	tag := fmt.Sprintf("coach-wrapped-test-listfilter-%x:latest", time.Now().UnixNano())
 	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag)
+	err = client.ImageBuild(ctx, buildCtx, tag, "")
 	require.NoError(t, err)
 
 	// Clean up after test

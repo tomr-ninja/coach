@@ -22,6 +22,7 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 	"github.com/tomr-ninja/coach/internal/utils"
@@ -63,10 +64,12 @@ func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error
 	return true, nil
 }
 
-func (c *Client) EnsureImageDigest(ctx context.Context, imageName string) ([32]byte, error) {
+func (c *Client) EnsureImageDigest(ctx context.Context, imageName, platform string) ([32]byte, error) {
 	inspect, err := c.internal.ImageInspect(ctx, imageName)
 	if err != nil {
-		pullResp, pullErr := c.internal.ImagePull(ctx, imageName, client.ImagePullOptions{})
+		pullResp, pullErr := c.internal.ImagePull(ctx, imageName, client.ImagePullOptions{
+			Platforms: parsePlatforms(platform),
+		})
 		if pullErr != nil {
 			return [32]byte{}, fmt.Errorf("pull image %s: %w", imageName, pullErr)
 		}
@@ -92,12 +95,13 @@ func (c *Client) EnsureImageDigest(ctx context.Context, imageName string) ([32]b
 	return sha256.Sum256([]byte(digestStr)), nil
 }
 
-func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag string) error {
+func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag, platform string) error {
 	suppress := !utils.IsVerbose(ctx)
 	resp, err := c.internal.ImageBuild(ctx, buildContext, client.ImageBuildOptions{
 		Tags:           []string{tag},
 		SuppressOutput: suppress,
 		Remove:         true,
+		Platforms:      parsePlatforms(platform),
 	})
 	if err != nil {
 		return fmt.Errorf("build image %s: %w", tag, err)
@@ -384,6 +388,25 @@ func (c *Client) containerLogs(ctx context.Context, containerID string) (string,
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// ImagePlatform returns the platform of a locally available image
+// in "os/arch" format (e.g., "linux/amd64").
+func (c *Client) ImagePlatform(ctx context.Context, imageName string) (string, error) {
+	inspect, err := c.internal.ImageInspect(ctx, imageName)
+	if err != nil {
+		return "", fmt.Errorf("inspect image %s: %w", imageName, err)
+	}
+	return inspect.Os + "/" + inspect.Architecture, nil
+}
+
+func parsePlatforms(platform string) []ocispec.Platform {
+	if platform == "" {
+		return nil
+	}
+	os, arch, _ := strings.Cut(platform, "/")
+
+	return []ocispec.Platform{{OS: os, Architecture: arch}}
 }
 
 func (c *Client) Close() error {
