@@ -42,6 +42,7 @@ type Config struct {
 	Registry       string             `json:"registry,omitempty"`
 	RegistryAuth   SecureString       `json:"registryAuth,omitzero"`
 	DriverTimeout  string             `json:"driverTimeout,omitempty"`
+	WebhookURL     string             `json:"webhookUrl,omitempty"`
 }
 
 type Backend struct {

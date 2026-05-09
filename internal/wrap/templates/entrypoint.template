@@ -1,23 +1,48 @@
 #!/bin/sh
-set -e
 
 DATA_DIR="/data"
 OUTPUT_DIR="/output"
-mkdir -p "$DATA_DIR" "$OUTPUT_DIR"
+STDERR_FILE="/tmp/stderr.txt"
+if ! mkdir -p "$DATA_DIR" "$OUTPUT_DIR"; then
+  echo "ERROR: failed to create data/output directories" >&2
+  APP_EXIT_CODE=1
+fi
+
+FP=""
+APP_EXIT_CODE=1
+UPLOAD_OK="false"
 
 echo "--- Phase 1: Fetching data and computing fingerprint ---"
-FP=$(coach-sidecar fetch --source "s3://${S3_PATH_IN}" --digest "$COACH_IMAGE_DIGEST" "$DATA_DIR")
-S3_PATH_OUT="${S3_PATH_OUT_PREFIX}${FP}"
-echo "Fingerprint: $FP"
-
-echo "--- Phase 2: Running Application ---"
-set +e
-{{.RunCommand}}
-APP_EXIT_CODE=$?
-
-echo "--- Phase 3: Uploading output to S3 ---"
-if ! coach-sidecar upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"; then
-  echo "WARNING: S3 upload failed (exit code $?), preserving application exit code $APP_EXIT_CODE" >&2
+if fetch_output=$(coach-sidecar fetch --source "s3://${S3_PATH_IN}" --digest "$COACH_IMAGE_DIGEST" "$DATA_DIR" 2>"$STDERR_FILE"); then
+  FP="$fetch_output"
+  S3_PATH_OUT="${S3_PATH_OUT_PREFIX}${FP}"
+  echo "Fingerprint: $FP"
+else
+  APP_EXIT_CODE=$?
+  echo "ERROR: Phase 1 fetch failed (exit code $APP_EXIT_CODE)" >&2
 fi
+
+if [ -n "$FP" ]; then
+  echo "--- Phase 2: Running Application ---"
+  {{.RunCommand}} 2>"$STDERR_FILE"
+  APP_EXIT_CODE=$?
+
+  echo "--- Phase 3: Uploading output to S3 ---"
+  if coach-sidecar upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"; then
+    UPLOAD_OK="true"
+  else
+    upload_rc=$?
+    echo "WARNING: S3 upload failed (exit code $upload_rc), preserving application exit code $APP_EXIT_CODE" >&2
+  fi
+fi
+
+echo "--- Phase 4: Finish hook ---"
+coach-sidecar finish \
+  --output-dir "$OUTPUT_DIR" \
+  --fingerprint "$FP" \
+  --exit-code "$APP_EXIT_CODE" \
+  --stderr-file "$STDERR_FILE" \
+  --upload-ok "$UPLOAD_OK" \
+  || echo "WARNING: finish hook failed (exit code $?)" >&2
 
 exit $APP_EXIT_CODE

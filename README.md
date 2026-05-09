@@ -119,6 +119,7 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
     }
   },
   "defaultBackend": "prefect",
+  "webhookUrl": "$WEBHOOK_URL",
   "s3": {
     "accessKeyId": "$S3_ACCESS_KEY_ID",
     "secretAccessKey": "$S3_SECRET_ACCESS_KEY",
@@ -134,6 +135,7 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
   - `driver` — path or name of the driver executable (must be on `$PATH` or absolute)
   - `platform` — (optional) target platform for wrapper images, e.g. `"linux/amd64"`. When set, the wrapper is built for this platform regardless of your local Docker daemon's default. When omitted, Coach auto-detects the platform from the locally available base image.
   - `config` — arbitrary JSON passed to the driver via `COACH_BACKEND_CONFIG` env var
+- `webhookUrl` — (optional) HTTP endpoint called on run completion (see [Finish webhook](#finish-webhook))
 - `defaultBackend` — used when `--backend` is omitted
 - `s3` — S3 credentials for both checksum resolution and container data sync:
   - `accessKeyId` — S3 access key ID
@@ -213,6 +215,7 @@ When the wrapper container starts, `entrypoint.sh` runs three phases:
 1. **Phase 1: Pull** — `rclone copy s3:$S3_PATH_IN /data` (downloads all data)
 2. **Phase 2: Train** — runs your model's original entrypoint + cmd (reads `/data`, writes `/output`)
 3. **Phase 3: Push** — `rclone copy /output s3:$S3_PATH_OUT` (uploads results)
+4. **Phase 4: Finish hook** — optionally POSTs a JSON summary to a webhook URL (see [Finish webhook](#finish-webhook))
 
 The rclone remote name is hardcoded to `s3` inside the wrapper. Credentials come from the `s3` block
 in `coach.json`, which are converted to `RCLONE_CONFIG_S3_*` env vars and injected into the container.
@@ -313,6 +316,34 @@ The driver receives:
 ```
 
 The driver creates a container from this image, injects these env vars, and starts it. The entrypoint script handles everything else.
+
+### Finish webhook
+
+When `webhookUrl` is set in `coach.json`, Coach sends an HTTP POST with a JSON body after each run completes.
+The webhook fires even if the run failed — `success` and `uploadOk` indicate the outcome.
+
+**Payload:**
+
+```json
+{
+  "fingerprint": "abc123...",
+  "success": true,
+  "uploadOk": true,
+  "error": "optional first 256 chars of stderr on failure",
+  "metrics": { "loss": 0.05 },
+  "meta": { "notes": "trial 42" }
+}
+```
+
+- `fingerprint` — artifact fingerprint computed from model digest + data checksums
+- `success` — `true` if the model exited with code 0
+- `uploadOk` — `true` if Phase 3 (S3 result upload) succeeded
+- `error` — first 256 characters of stderr, only included on non-zero exit
+- `metrics` — contents of `/output/metrics.json` if present and under 1 MiB
+- `meta` — contents of `/output/meta.json` if present and under 1 MiB
+
+The request times out after 30 seconds. On HTTP 4xx/5xx, Coach prints a warning but does not fail the run —
+the model's exit code is always preserved.
 
 #### S3-compatible providers (Cloudflare R2, MinIO, etc.)
 

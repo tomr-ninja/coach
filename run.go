@@ -220,6 +220,7 @@ func s3WrapperEnvVars(cfg *config.Config, s3PathIn, s3PathOutPrefix, imageDigest
 		"S3_PATH_IN":            s3PathIn,
 		"S3_PATH_OUT_PREFIX":    s3PathOutPrefix,
 		"COACH_IMAGE_DIGEST":    imageDigestHex,
+		"COACH_WEBHOOK_URL":     cfg.WebhookURL,
 		"AWS_ACCESS_KEY_ID":     s3.AccessKeyID.Reveal(),
 		"AWS_SECRET_ACCESS_KEY": s3.SecretAccessKey.Reveal(),
 		"AWS_REGION":            s3.Region,

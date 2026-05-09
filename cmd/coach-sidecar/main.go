@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +27,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "usage: coach-sidecar <command> [args]\n")
 		fmt.Fprintf(os.Stderr, "  fetch  --source s3:bucket/prefix --digest <hex> <data-dir>\n")
 		fmt.Fprintf(os.Stderr, "  upload <local-dir> s3:bucket/prefix\n")
+		fmt.Fprintf(os.Stderr, "  finish --output-dir <dir> [--fingerprint <hex>] --exit-code <int> [--stderr-file <path>] [--upload-ok <bool>]\n")
 		os.Exit(1)
 	}
 
@@ -31,6 +36,8 @@ func main() {
 		cmdFetch(os.Args[2:])
 	case "upload":
 		cmdUpload(os.Args[2:])
+	case "finish":
+		cmdFinish(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -320,4 +327,123 @@ func trimSpace(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s
+}
+
+// finishPayload is the JSON body sent to the webhook on run completion.
+type finishPayload struct {
+	Fingerprint string          `json:"fingerprint"`
+	Success     bool            `json:"success"`
+	Error       string          `json:"error,omitempty"`
+	UploadOk    bool            `json:"uploadOk"`
+	Metrics     json.RawMessage `json:"metrics,omitempty"`
+	Meta        json.RawMessage `json:"meta,omitempty"`
+}
+
+func cmdFinish(args []string) {
+	var outputDir, fingerprint, stderrFile string
+	exitCode := -1
+	uploadOk := true
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--output-dir":
+			i++
+			if i < len(args) {
+				outputDir = args[i]
+			}
+		case "--fingerprint":
+			i++
+			if i < len(args) {
+				fingerprint = args[i]
+			}
+		case "--exit-code":
+			i++
+			if i < len(args) {
+				if v, err := strconv.Atoi(args[i]); err == nil {
+					exitCode = v
+				}
+			}
+		case "--stderr-file":
+			i++
+			if i < len(args) {
+				stderrFile = args[i]
+			}
+		case "--upload-ok":
+			i++
+			if i < len(args) {
+				if ok, err := strconv.ParseBool(args[i]); err == nil {
+					uploadOk = ok
+				}
+			}
+		}
+	}
+
+	if outputDir == "" || exitCode < 0 {
+		fmt.Fprintf(os.Stderr, "usage: coach-sidecar finish --output-dir <dir> [--fingerprint <hex>] --exit-code <int> [--stderr-file <path>] [--upload-ok <bool>]\n")
+		os.Exit(1)
+	}
+
+	webhookURL := os.Getenv("COACH_WEBHOOK_URL")
+	if webhookURL == "" {
+		fmt.Fprintf(os.Stderr, "COACH_WEBHOOK_URL not set, skipping finish hook\n")
+		return
+	}
+
+	payload := finishPayload{
+		Fingerprint: fingerprint,
+		Success:     exitCode == 0,
+		UploadOk:    uploadOk,
+	}
+
+	if exitCode != 0 && stderrFile != "" {
+		if raw, err := os.ReadFile(stderrFile); err == nil {
+			msg := strings.TrimSpace(string(raw))
+			if runes := []rune(msg); len(runes) > 256 {
+				msg = string(runes[:256])
+			}
+			payload.Error = msg
+			fmt.Fprintf(os.Stderr, "finish hook: captured stderr (%d chars)\n", len(msg))
+		}
+	}
+
+	const maxFileSize = 1 << 20 // 1 MiB
+	if metricsData, err := os.ReadFile(filepath.Join(outputDir, "metrics.json")); err == nil && len(metricsData) <= maxFileSize && json.Valid(metricsData) {
+		payload.Metrics = metricsData
+		fmt.Fprintf(os.Stderr, "finish hook: loaded metrics.json\n")
+	}
+
+	if metaData, err := os.ReadFile(filepath.Join(outputDir, "meta.json")); err == nil && len(metaData) <= maxFileSize && json.Valid(metaData) {
+		payload.Meta = metaData
+		fmt.Fprintf(os.Stderr, "finish hook: loaded meta.json\n")
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "finish hook: marshal payload: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "finish hook: create request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "finish hook: POST failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		fmt.Fprintf(os.Stderr, "finish hook: got HTTP %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "finish hook: posted successfully (%d)\n", resp.StatusCode)
 }
