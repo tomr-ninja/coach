@@ -404,8 +404,10 @@ func parsePlatforms(platform string) []ocispec.Platform {
 	if platform == "" {
 		return nil
 	}
-	os, arch, _ := strings.Cut(platform, "/")
-
+	os, arch, ok := strings.Cut(platform, "/")
+	if !ok || os == "" || arch == "" {
+		return nil
+	}
 	return []ocispec.Platform{{OS: os, Architecture: arch}}
 }
 
