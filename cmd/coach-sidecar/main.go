@@ -20,7 +20,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: coach-artifact <command> [args]\n")
+		fmt.Fprintf(os.Stderr, "usage: coach-sidecar <command> [args]\n")
 		fmt.Fprintf(os.Stderr, "  fetch  --source s3:bucket/prefix --digest <hex> <data-dir>\n")
 		fmt.Fprintf(os.Stderr, "  upload <local-dir> s3:bucket/prefix\n")
 		os.Exit(1)
@@ -58,7 +58,7 @@ func cmdFetch(args []string) {
 	}
 
 	if source == "" || digestHex == "" || dataDir == "" {
-		fmt.Fprintf(os.Stderr, "usage: coach-artifact fetch --source s3:bucket/prefix --digest <hex> <data-dir>\n")
+		fmt.Fprintf(os.Stderr, "usage: coach-sidecar fetch --source s3:bucket/prefix --digest <hex> <data-dir>\n")
 		os.Exit(1)
 	}
 
@@ -150,7 +150,7 @@ func cmdFetch(args []string) {
 
 func cmdUpload(args []string) {
 	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: coach-artifact upload <local-dir> s3:bucket/prefix\n")
+		fmt.Fprintf(os.Stderr, "usage: coach-sidecar upload <local-dir> s3:bucket/prefix\n")
 		os.Exit(1)
 	}
 

@@ -33,7 +33,7 @@ var ErrNoRegistry = fmt.Errorf("registry is required for remote S3 runs (set in 
 //
 // targetPlatform is an optional "os/arch" specifier (e.g., "linux/amd64").
 // When empty, the platform is auto-detected from the locally available base image.
-// The coach-artifact binary is cross-compiled inside a multi-stage Docker build.
+// The coach-sidecar binary is cross-compiled inside a multi-stage Docker build.
 func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registryAuth, targetPlatform string, entrypoint []string) (string, error) {
 	safeName := SanitizeImageName(baseImage)
 	shortFP := randomSuffix()
@@ -62,8 +62,8 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registry
 	if err := copyDir(filepath.Join(moduleRoot, "internal", "artifact"), filepath.Join(tmpDir, "internal", "artifact")); err != nil {
 		return "", fmt.Errorf("copy internal/artifact: %w", err)
 	}
-	if err := copyDir(filepath.Join(moduleRoot, "cmd", "coach-artifact"), filepath.Join(tmpDir, "cmd", "coach-artifact")); err != nil {
-		return "", fmt.Errorf("copy cmd/coach-artifact: %w", err)
+	if err := copyDir(filepath.Join(moduleRoot, "cmd", "coach-sidecar"), filepath.Join(tmpDir, "cmd", "coach-sidecar")); err != nil {
+		return "", fmt.Errorf("copy cmd/coach-sidecar: %w", err)
 	}
 
 	var runCommand string

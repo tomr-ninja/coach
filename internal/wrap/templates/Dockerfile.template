@@ -1,15 +1,15 @@
-# Stage 1: Build coach-artifact
+# Stage 1: Build coach-sidecar
 FROM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY internal/artifact/ internal/artifact/
-COPY cmd/coach-artifact/ cmd/coach-artifact/
-RUN CGO_ENABLED=0 GOOS={{.TargetOS}} GOARCH={{.TargetArch}} go build -o /coach-artifact ./cmd/coach-artifact/
+COPY cmd/coach-sidecar/ cmd/coach-sidecar/
+RUN CGO_ENABLED=0 GOOS={{.TargetOS}} GOARCH={{.TargetArch}} go build -o /coach-sidecar ./cmd/coach-sidecar/
 
 # Stage 2: Wrapper image
 FROM {{.BaseImage}}
-COPY --from=builder /coach-artifact /usr/local/bin/coach-artifact
+COPY --from=builder /coach-sidecar /usr/local/bin/coach-sidecar
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
