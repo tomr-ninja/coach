@@ -29,10 +29,10 @@ func RunScript(ctx context.Context, modelImage string, script string, args []str
 	if err := validate.ScriptName(script); err != nil {
 		return fmt.Errorf("validate script name: %w", err)
 	}
-	if err := validate.DataPath(dataDir); err != nil {
+	if err := validate.DirPath(dataDir); err != nil {
 		return fmt.Errorf("validate data path: %w", err)
 	}
-	if err := validate.OutputDir(outputDir); err != nil {
+	if err := validate.DirPath(outputDir); err != nil {
 		return fmt.Errorf("validate output dir: %w", err)
 	}
 

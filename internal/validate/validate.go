@@ -14,14 +14,10 @@ import (
 var (
 	ErrModelImageEmpty     = errors.New("model image is empty")
 	ErrModelImageNoTag     = errors.New("model image has no explicit tag or digest")
-	ErrDataPathEmpty       = errors.New("data path is empty")
-	ErrDataPathMissing     = errors.New("data path does not exist")
-	ErrDataPathNotDir      = errors.New("data path is not a directory")
-	ErrDataPathS3Format    = errors.New("invalid s3 data path format")
-	ErrOutputDirEmpty      = errors.New("output directory is empty")
-	ErrOutputDirMissing    = errors.New("output directory does not exist")
-	ErrOutputDirNotDir     = errors.New("output path is not a directory")
-	ErrOutputDirS3Format   = errors.New("invalid s3 output path format")
+	ErrDirEmpty            = errors.New("directory path is empty")
+	ErrDirMissing          = errors.New("directory does not exist")
+	ErrDirNotDir           = errors.New("path is not a directory")
+	ErrDirS3Format         = errors.New("invalid s3 directory path format")
 	ErrCronExpression      = errors.New("invalid cron expression")
 	ErrScriptNameEmpty     = errors.New("script name is empty")
 	ErrScriptNamePathSep   = errors.New("script name must not contain path separators")
@@ -48,52 +44,28 @@ func ModelImage(image string) error {
 	return nil
 }
 
-// DataPath checks that a local data directory exists. S3 URIs are
-// validated for format but not resolved remotely.
-func DataPath(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return ErrDataPathEmpty
+// DirPath validates that a local directory path exists, or that an S3 URI
+// is well-formed. Callers should wrap errors to indicate which path is
+// being validated (e.g. "validate data path: %w", "validate output dir: %w").
+func DirPath(p string) error {
+	if strings.TrimSpace(p) == "" {
+		return ErrDirEmpty
 	}
-	if strings.HasPrefix(path, "s3://") {
-		if len(path) <= len("s3://") {
-			return ErrDataPathS3Format
+	if strings.HasPrefix(p, "s3://") {
+		if len(p) <= len("s3://") {
+			return ErrDirS3Format
 		}
 		return nil
 	}
-	info, err := os.Stat(path)
+	info, err := os.Stat(p)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", ErrDataPathMissing, path)
+			return fmt.Errorf("%w: %s", ErrDirMissing, p)
 		}
-		return fmt.Errorf("stat data path %s: %w", path, err)
+		return fmt.Errorf("stat %s: %w", p, err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%w: %s", ErrDataPathNotDir, path)
-	}
-	return nil
-}
-
-// OutputDir checks that a local output directory exists. S3 URIs are
-// validated for format only.
-func OutputDir(dir string) error {
-	if strings.TrimSpace(dir) == "" {
-		return ErrOutputDirEmpty
-	}
-	if strings.HasPrefix(dir, "s3://") {
-		if len(dir) <= len("s3://") {
-			return ErrOutputDirS3Format
-		}
-		return nil
-	}
-	info, err := os.Stat(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", ErrOutputDirMissing, dir)
-		}
-		return fmt.Errorf("stat output dir %s: %w", dir, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%w: %s", ErrOutputDirNotDir, dir)
+		return fmt.Errorf("%w: %s", ErrDirNotDir, p)
 	}
 	return nil
 }

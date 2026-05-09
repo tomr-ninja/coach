@@ -197,9 +197,9 @@ func maybeTransient(err error) error {
 	if coacherrors.IsNetworkError(err) {
 		return coacherrors.AsTransient(err)
 	}
-	var respErr *smithyhttp.ResponseError
-	if errors.As(err, &respErr) && respErr.HTTPStatusCode() >= 500 {
+	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok && respErr.HTTPStatusCode() >= 500 {
 		return coacherrors.AsTransient(err)
 	}
+
 	return err
 }

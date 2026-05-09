@@ -39,75 +39,41 @@ func TestModelImage(t *testing.T) {
 	})
 }
 
-func TestDataPath(t *testing.T) {
+func TestDirPath(t *testing.T) {
 	t.Run("valid local directory", func(t *testing.T) {
 		dir := t.TempDir()
-		require.NoError(t, DataPath(dir))
+		require.NoError(t, DirPath(dir))
 	})
 
 	t.Run("missing local directory", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "missing")
-		err := DataPath(dir)
-		require.ErrorIs(t, err, ErrDataPathMissing)
+		err := DirPath(dir)
+		require.ErrorIs(t, err, ErrDirMissing)
 	})
 
 	t.Run("local file not directory", func(t *testing.T) {
 		f := filepath.Join(t.TempDir(), "file.txt")
 		require.NoError(t, os.WriteFile(f, []byte("x"), 0o644))
-		err := DataPath(f)
-		require.ErrorIs(t, err, ErrDataPathNotDir)
+		err := DirPath(f)
+		require.ErrorIs(t, err, ErrDirNotDir)
 	})
 
 	t.Run("empty string", func(t *testing.T) {
-		err := DataPath("")
-		require.ErrorIs(t, err, ErrDataPathEmpty)
+		err := DirPath("")
+		require.ErrorIs(t, err, ErrDirEmpty)
 	})
 
 	t.Run("valid s3 path", func(t *testing.T) {
-		require.NoError(t, DataPath("s3://bucket/prefix"))
+		require.NoError(t, DirPath("s3://bucket/prefix"))
 	})
 
 	t.Run("s3 path with only bucket", func(t *testing.T) {
-		require.NoError(t, DataPath("s3://bucket"))
+		require.NoError(t, DirPath("s3://bucket"))
 	})
 
 	t.Run("invalid s3 path", func(t *testing.T) {
-		err := DataPath("s3://")
-		require.ErrorIs(t, err, ErrDataPathS3Format)
-	})
-}
-
-func TestOutputDir(t *testing.T) {
-	t.Run("valid local directory", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, OutputDir(dir))
-	})
-
-	t.Run("missing local directory", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "missing")
-		err := OutputDir(dir)
-		require.ErrorIs(t, err, ErrOutputDirMissing)
-	})
-
-	t.Run("local file not directory", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), "file.txt")
-		require.NoError(t, os.WriteFile(f, []byte("x"), 0o644))
-		err := OutputDir(f)
-		require.ErrorIs(t, err, ErrOutputDirNotDir)
-	})
-
-	t.Run("empty string", func(t *testing.T) {
-		err := OutputDir("")
-		require.ErrorIs(t, err, ErrOutputDirEmpty)
-	})
-
-	t.Run("valid s3 path", func(t *testing.T) {
-		require.NoError(t, OutputDir("s3://bucket/prefix"))
-	})
-
-	t.Run("invalid s3 path", func(t *testing.T) {
-		err := OutputDir("s3://")
-		require.ErrorIs(t, err, ErrOutputDirS3Format)
+		err := DirPath("s3://")
+		require.ErrorIs(t, err, ErrDirS3Format)
 	})
 }
 
@@ -167,5 +133,25 @@ func TestScriptName(t *testing.T) {
 	t.Run("whitespace only", func(t *testing.T) {
 		err := ScriptName("   ")
 		require.ErrorIs(t, err, ErrScriptNameEmpty)
+	})
+}
+
+func TestLocalVsS3(t *testing.T) {
+	t.Run("both local", func(t *testing.T) {
+		require.NoError(t, LocalVsS3("/data", "/output"))
+	})
+
+	t.Run("both s3", func(t *testing.T) {
+		require.NoError(t, LocalVsS3("s3://bucket/data", "s3://bucket/output"))
+	})
+
+	t.Run("mixed local-s3", func(t *testing.T) {
+		err := LocalVsS3("/data", "s3://bucket/output")
+		require.ErrorIs(t, err, ErrMixedLocalS3)
+	})
+
+	t.Run("mixed s3-local", func(t *testing.T) {
+		err := LocalVsS3("s3://bucket/data", "/output")
+		require.ErrorIs(t, err, ErrMixedLocalS3)
 	})
 }

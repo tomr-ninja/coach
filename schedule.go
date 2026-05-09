@@ -35,10 +35,10 @@ func ScheduleCreate(
 	if err := validate.ModelImage(modelImage); err != nil {
 		return "", fmt.Errorf("validate model image: %w", err)
 	}
-	if err := validate.DataPath(dataSource); err != nil {
+	if err := validate.DirPath(dataSource); err != nil {
 		return "", fmt.Errorf("validate data source: %w", err)
 	}
-	if err := validate.OutputDir(outputURI); err != nil {
+	if err := validate.DirPath(outputURI); err != nil {
 		return "", fmt.Errorf("validate output destination: %w", err)
 	}
 	if err := validate.Cron(scheduleCron); err != nil {

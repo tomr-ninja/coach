@@ -25,10 +25,10 @@ func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool)
 	if err := validate.ModelImage(modelImage); err != nil {
 		return artifact.Zero, fmt.Errorf("validate model image: %w", err)
 	}
-	if err := validate.DataPath(dataDir); err != nil {
+	if err := validate.DirPath(dataDir); err != nil {
 		return artifact.Zero, fmt.Errorf("validate data path: %w", err)
 	}
-	if err := validate.OutputDir(outputDir); err != nil {
+	if err := validate.DirPath(outputDir); err != nil {
 		return artifact.Zero, fmt.Errorf("validate output dir: %w", err)
 	}
 
@@ -53,10 +53,10 @@ func RunLocal(ctx context.Context, modelImage, dataDir, outputDir string, force 
 	if err := validate.ModelImage(modelImage); err != nil {
 		return artifact.Zero, fmt.Errorf("validate model image: %w", err)
 	}
-	if err := validate.DataPath(dataDir); err != nil {
+	if err := validate.DirPath(dataDir); err != nil {
 		return artifact.Zero, fmt.Errorf("validate data path: %w", err)
 	}
-	if err := validate.OutputDir(outputDir); err != nil {
+	if err := validate.DirPath(outputDir); err != nil {
 		return artifact.Zero, fmt.Errorf("validate output dir: %w", err)
 	}
 
@@ -108,10 +108,10 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 	if err := validate.ModelImage(modelImage); err != nil {
 		return artifact.Zero, fmt.Errorf("validate model image: %w", err)
 	}
-	if err := validate.DataPath(s3DataSource); err != nil {
+	if err := validate.DirPath(s3DataSource); err != nil {
 		return artifact.Zero, fmt.Errorf("validate data path: %w", err)
 	}
-	if err := validate.OutputDir(s3OutputDir); err != nil {
+	if err := validate.DirPath(s3OutputDir); err != nil {
 		return artifact.Zero, fmt.Errorf("validate output dir: %w", err)
 	}
 

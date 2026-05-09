@@ -3,7 +3,10 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,6 +138,87 @@ func TestConfigBackend(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errBackendNotFound)
 	})
+}
+
+func TestDriverTimeoutDuration(t *testing.T) {
+	t.Run("default when empty", func(t *testing.T) {
+		cfg := Config{}
+		assert.Equal(t, defaultDriverTimeout, cfg.DriverTimeoutDuration())
+	})
+
+	t.Run("parses duration", func(t *testing.T) {
+		cfg := Config{DriverTimeout: "10m"}
+		assert.Equal(t, 10*time.Minute, cfg.DriverTimeoutDuration())
+	})
+
+	t.Run("falls back on invalid", func(t *testing.T) {
+		cfg := Config{DriverTimeout: "not-a-duration"}
+		assert.Equal(t, defaultDriverTimeout, cfg.DriverTimeoutDuration())
+	})
+}
+
+func TestExpandEnvInValue_Map(t *testing.T) {
+	t.Run("nil map", func(t *testing.T) {
+		var m map[string]Backend
+		val := reflect.ValueOf(m)
+		err := expandEnvInValue(val)
+		require.NoError(t, err)
+	})
+}
+
+func TestLoadConfig_HappyPath(t *testing.T) {
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+
+	cfgContent := `{
+		"defaultBackend": "prod",
+		"registry": "my-registry",
+		"driverTimeout": "2m",
+		"s3": {
+			"region": "us-east-1",
+			"endpoint": "https://s3.example.com"
+		},
+		"backends": {
+			"prod": {
+				"driver": "/usr/local/bin/coach-scaleway",
+				"config": {"project": "my-proj"},
+				"platform": "linux/amd64"
+			}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "coach.json"), []byte(cfgContent), 0o644))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	assert.Equal(t, "prod", cfg.DefaultBackend)
+	assert.Equal(t, "my-registry", cfg.Registry)
+	assert.Equal(t, "us-east-1", cfg.S3.Region)
+	assert.Equal(t, "https://s3.example.com", cfg.S3.Endpoint)
+	assert.Equal(t, 2*time.Minute, cfg.DriverTimeoutDuration())
+
+	b, err := cfg.Backend("prod")
+	require.NoError(t, err)
+	assert.Equal(t, "/usr/local/bin/coach-scaleway", b.Driver)
+	assert.JSONEq(t, `{"project":"my-proj"}`, string(b.Config))
+}
+
+func TestExpandEnvInValue_NonPointerStruct(t *testing.T) {
+	// expandEnvInValue on a struct (not pointer to struct) process fields normally
+	cfg := Config{Registry: "test"}
+	val := reflect.ValueOf(cfg)
+	err := expandEnvInValue(val)
+	require.NoError(t, err) // structs are handled directly
+}
+
+func TestUnmarshalJSON_Invalid(t *testing.T) {
+	var s SecureString
+	err := s.UnmarshalJSON([]byte(`invalid`))
+	require.Error(t, err)
 }
 
 func TestLoadConfigNotFound(t *testing.T) {

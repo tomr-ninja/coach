@@ -92,11 +92,11 @@ func main() {
 		if err := validate.ModelImage(modelImage); err != nil {
 			handleError(err)
 		}
-		if err := validate.DataPath(data); err != nil {
-			handleError(err)
+		if err := validate.DirPath(data); err != nil {
+			handleError(fmt.Errorf("validate data path: %w", err))
 		}
-		if err := validate.OutputDir(output); err != nil {
-			handleError(err)
+		if err := validate.DirPath(output); err != nil {
+			handleError(fmt.Errorf("validate output dir: %w", err))
 		}
 
 		ctx, cancel := signalContext()
@@ -172,11 +172,11 @@ func main() {
 			if err := validate.ScriptName(scriptName); err != nil {
 				handleError(err)
 			}
-			if err := validate.DataPath(data); err != nil {
-				handleError(err)
+			if err := validate.DirPath(data); err != nil {
+				handleError(fmt.Errorf("validate data path: %w", err))
 			}
-			if err := validate.OutputDir(output); err != nil {
-				handleError(err)
+			if err := validate.DirPath(output); err != nil {
+				handleError(fmt.Errorf("validate output dir: %w", err))
 			}
 
 			ctx, cancel := signalContext()
@@ -245,11 +245,11 @@ func main() {
 			if err := validate.ModelImage(modelImage); err != nil {
 				handleError(err)
 			}
-			if err := validate.DataPath(dataSource); err != nil {
-				handleError(err)
+			if err := validate.DirPath(dataSource); err != nil {
+				handleError(fmt.Errorf("validate data path: %w", err))
 			}
-			if err := validate.OutputDir(outputURI); err != nil {
-				handleError(err)
+			if err := validate.DirPath(outputURI); err != nil {
+				handleError(fmt.Errorf("validate output dir: %w", err))
 			}
 			if err := validate.Cron(sched); err != nil {
 				handleError(err)

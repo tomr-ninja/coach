@@ -212,14 +212,12 @@ func IsNetworkError(err error) bool {
 
 func isNetworkErrorLeaf(err error) bool {
 	// net.OpError covers most I/O failures: dial, read, write timeouts, connection refused.
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true
 	}
 
 	// net.DNSError covers DNS failures (NXDOMAIN, no such host, timeout).
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
 		return true
 	}
 
@@ -259,7 +257,6 @@ func isTransientSyscall(err error) bool {
 	}
 }
 
-// 1: internal, 2: user, 3: I/O, 4: driver.
 func ExitCode(kind Kind) int {
 	switch kind {
 	case KindUser:
