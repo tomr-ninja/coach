@@ -235,8 +235,8 @@ func isNetworkErrorLeaf(err error) bool {
 }
 
 func isTransientSyscall(err error) bool {
-	var errno syscall.Errno
-	if !errors.As(err, &errno) {
+	errno, ok := errors.AsType[syscall.Errno](err)
+	if !ok {
 		return false
 	}
 	switch {
