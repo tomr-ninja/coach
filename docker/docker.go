@@ -5,9 +5,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,16 +83,18 @@ func (c *Client) EnsureImageDigest(ctx context.Context, imageName, platform stri
 		}
 	}
 
-	var digestStr string
-	if len(inspect.RepoDigests) > 0 {
-		digestStr = inspect.RepoDigests[0]
-	} else if inspect.ID != "" {
-		digestStr = inspect.ID
-	} else {
+	if inspect.ID == "" {
 		return [32]byte{}, fmt.Errorf("%w: %s", errNoDigest, imageName)
 	}
 
-	return sha256.Sum256([]byte(digestStr)), nil
+	id := strings.TrimPrefix(inspect.ID, "sha256:")
+	digest, err := hex.DecodeString(id)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("invalid image ID %s: %w", inspect.ID, err)
+	}
+	var out [32]byte
+	copy(out[:], digest)
+	return out, nil
 }
 
 func (c *Client) ImageBuild(ctx context.Context, buildContext io.Reader, tag, platform string) error {
@@ -404,11 +406,11 @@ func parsePlatforms(platform string) []ocispec.Platform {
 	if platform == "" {
 		return nil
 	}
-	os, arch, ok := strings.Cut(platform, "/")
-	if !ok || os == "" || arch == "" {
+	osName, arch, ok := strings.Cut(platform, "/")
+	if !ok || osName == "" || arch == "" {
 		return nil
 	}
-	return []ocispec.Platform{{OS: os, Architecture: arch}}
+	return []ocispec.Platform{{OS: osName, Architecture: arch}}
 }
 
 func (c *Client) Close() error {
