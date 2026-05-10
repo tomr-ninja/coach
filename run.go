@@ -3,7 +3,6 @@ package coach
 import (
 	"context"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,10 +15,6 @@ import (
 	"github.com/tomr-ninja/coach/internal/utils"
 	"github.com/tomr-ninja/coach/internal/validate"
 	"github.com/tomr-ninja/coach/internal/wrap"
-)
-
-var (
-	errNoDataFiles = errors.New("no data files found")
 )
 
 func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
@@ -165,29 +160,6 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 	}
 
 	return fingerprint, nil
-}
-
-// ResolveChecksums resolves data checksums for either a local path or an S3 URI.
-func ResolveChecksums(source string, cfg *config.Config) ([][32]byte, error) {
-	if strings.HasPrefix(source, "s3://") {
-		checksums, err := storage.Checksums(source, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("s3 checksums for %s: %w", source, err)
-		}
-		if len(checksums) == 0 {
-			return nil, storage.ErrNoObjects
-		}
-		return checksums, nil
-	}
-
-	checksums, err := artifact.CollectChecksums(source)
-	if err != nil {
-		return nil, fmt.Errorf("local checksums for %s: %w", source, err)
-	}
-	if len(checksums) == 0 {
-		return nil, errNoDataFiles
-	}
-	return checksums, nil
 }
 
 func resolveFingerprint(ctx context.Context, client *docker.Client, modelImage string, checksums [][32]byte) ([32]byte, error) {
