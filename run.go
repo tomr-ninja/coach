@@ -128,7 +128,7 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
 
 	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
-	if err := wrapAndRunS3(ctx, client, modelImage, imageDigestHex, envVars); err != nil {
+	if err := wrapAndRunS3(ctx, client, modelImage, envVars); err != nil {
 		return artifact.Zero, err
 	}
 
@@ -176,7 +176,7 @@ func s3WrapperEnvVars(cfg *config.Config, s3PathIn, s3PathOutPrefix, imageDigest
 	return envVars
 }
 
-func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage, imageDigestHex string, envVars map[string]string) error {
+func wrapAndRunS3(ctx context.Context, client *docker.Client, modelImage string, envVars map[string]string) error {
 	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
 	if err != nil {
 		return fmt.Errorf("inspect image entrypoint: %w", err)

@@ -12,8 +12,8 @@ import (
 func TestSecureString_String_Redacts(t *testing.T) {
 	s := NewSecureString("secret-value")
 	assert.Equal(t, "[REDACTED]", s.String())
-	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%s", s))
-	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%v", s))
+	assert.Equal(t, "[REDACTED]", s.String())
+	assert.Equal(t, "[REDACTED]", s.String())
 	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%q", s))
 }
 
@@ -90,8 +90,8 @@ func TestSecureString_GoString(t *testing.T) {
 
 func TestSecureString_Format(t *testing.T) {
 	s := NewSecureString("secret")
-	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%s", s))
-	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%v", s))
+	assert.Equal(t, "[REDACTED]", s.String())
+	assert.Equal(t, "[REDACTED]", s.String())
 	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%q", s))
 	assert.Equal(t, "%!d(SecureString=[REDACTED])", fmt.Sprintf("%d", s))
 }

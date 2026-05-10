@@ -131,7 +131,7 @@ func expandEnvString(s string) (string, error) {
 	if !ok {
 		return "", coacherrors.WithHint(
 			fmt.Errorf("%w: %q", errEnvVarNotSet, name),
-			fmt.Sprintf("Export %s=... before running coach, or replace \"%s\" with a literal value in coach.json", name, name),
+			fmt.Sprintf("Export %s=... before running coach, or replace %q with a literal value in coach.json", name, name),
 		)
 	}
 
@@ -212,7 +212,7 @@ func expandEnvInConfig(raw json.RawMessage) (json.RawMessage, error) {
 		if !ok {
 			expandErr = coacherrors.WithHint(
 				fmt.Errorf("%w: %q", errEnvVarNotSet, name),
-				fmt.Sprintf("Export %s=... before running coach, or replace \"%s\" with a literal value in coach.json", name, name),
+				fmt.Sprintf("Export %s=... before running coach, or replace %q with a literal value in coach.json", name, name),
 			)
 			return match
 		}

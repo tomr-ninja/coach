@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -20,6 +21,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/tomr-ninja/coach/internal/artifact"
+)
+
+var (
+	errInvalidDigestHex  = errors.New("invalid digest hex")
+	errS3Client          = errors.New("create s3 client")
+	errCreateDataDir     = errors.New("create data dir")
+	errListS3Objects     = errors.New("list s3 objects")
+	errDownload          = errors.New("download")
+	errNoMatchingS3Files = errors.New("no data files matched")
+	errCollectChecksums  = errors.New("collect checksums")
+	errUploadFailed      = errors.New("upload")
+	errFinishMarshal     = errors.New("finish hook: marshal payload")
+	errFinishRequest     = errors.New("finish hook: create request")
+	errFinishPost        = errors.New("finish hook: POST failed")
+	errFinishHTTP        = errors.New("finish hook: got HTTP error")
 )
 
 func main() {
@@ -69,10 +85,18 @@ func cmdFetch(args []string) {
 		os.Exit(1)
 	}
 
+	fp, err := doFetch(source, digestHex, dataDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%x\n", fp)
+}
+
+func doFetch(source, digestHex, dataDir string) ([32]byte, error) {
 	digest, err := hex.DecodeString(digestHex)
 	if err != nil || len(digest) != 32 {
-		fmt.Fprintf(os.Stderr, "invalid digest hex (need 64 chars): %v\n", err)
-		os.Exit(1)
+		return [32]byte{}, fmt.Errorf("%w: %w", errInvalidDigestHex, err)
 	}
 	var digestArr [32]byte
 	copy(digestArr[:], digest)
@@ -84,32 +108,29 @@ func cmdFetch(args []string) {
 
 	s3Client, err := newS3Client(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "create s3 client: %v\n", err)
-		os.Exit(1)
+		return [32]byte{}, fmt.Errorf("%w: %w", errS3Client, err)
 	}
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "create data dir: %v\n", err)
-		os.Exit(1)
+	//nolint:gosec // CLI sidecar: dataDir comes from container entrypoint args
+	if mErr := os.MkdirAll(dataDir, 0o755); mErr != nil {
+		return [32]byte{}, fmt.Errorf("%w: %w", errCreateDataDir, mErr)
 	}
 
 	fmt.Fprintf(os.Stderr, "Fetching data from s3://%s/%s...\n", bucket, prefix)
 
-	// Fetch ignore file from S3 first.
 	ignoreSet := fetchFilterFile(ctx, s3Client, bucket, prefix, ".coachignore")
 
-	// List and download S3 objects.
 	paginator := s3.NewListObjectsV2Paginator(s3Client, &s3.ListObjectsV2Input{
 		Bucket: &bucket,
 		Prefix: &prefix,
 	})
 
 	fileCount := 0
+	var page *s3.ListObjectsV2Output
 	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
+		page, err = paginator.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "list s3 objects: %v\n", err)
-			os.Exit(1)
+			return [32]byte{}, fmt.Errorf("%w: %w", errListS3Objects, err)
 		}
 		for _, obj := range page.Contents {
 			key := deref(obj.Key)
@@ -124,35 +145,31 @@ func cmdFetch(args []string) {
 				continue
 			}
 
-			// Apply ignore filter.
 			if ignoreSet[rel] {
 				fmt.Fprintf(os.Stderr, "  skip (ignored): %s\n", rel)
 				continue
 			}
 
-			if err := downloadFile(ctx, s3Client, bucket, key, dataDir, rel); err != nil {
-				fmt.Fprintf(os.Stderr, "download %s: %v\n", rel, err)
-				os.Exit(1)
+			if dErr := downloadFile(ctx, s3Client, bucket, key, dataDir, rel); dErr != nil {
+				return [32]byte{}, fmt.Errorf("%w: %s: %w", errDownload, rel, dErr)
 			}
 			fileCount++
 		}
 	}
 
 	if fileCount == 0 {
-		fmt.Fprintf(os.Stderr, "no data files matched at s3://%s/%s\n", bucket, prefix)
-		os.Exit(1)
+		return [32]byte{}, fmt.Errorf("%w: s3://%s/%s", errNoMatchingS3Files, bucket, prefix)
 	}
 
 	fmt.Fprintf(os.Stderr, "Downloaded %d files. Computing fingerprint...\n", fileCount)
 
 	checksums, err := artifact.CollectChecksums(dataDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "collect checksums: %v\n", err)
-		os.Exit(1)
+		return [32]byte{}, fmt.Errorf("%w: %w", errCollectChecksums, err)
 	}
 
 	fp := artifact.Fingerprint(digestArr, checksums)
-	fmt.Printf("%x\n", fp)
+	return fp, nil
 }
 
 func cmdUpload(args []string) {
@@ -163,6 +180,14 @@ func cmdUpload(args []string) {
 
 	localDir := args[0]
 	s3Dest := args[1]
+
+	if err := doUpload(localDir, s3Dest); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+func doUpload(localDir, s3Dest string) error {
 	bucket, prefix := parseURI(s3Dest)
 	prefix = strings.TrimSuffix(prefix, "/") + "/"
 
@@ -171,41 +196,42 @@ func cmdUpload(args []string) {
 
 	s3Client, err := newS3Client(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "create s3 client: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("%w: %w", errS3Client, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Uploading to s3://%s/%s...\n", bucket, prefix)
 
 	fileCount := 0
-	err = filepath.WalkDir(localDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	//nolint:gosec // CLI sidecar: localDir comes from container entrypoint args
+	err = filepath.WalkDir(localDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 		if d.IsDir() {
 			return nil
 		}
 
-		rel, err := filepath.Rel(localDir, path)
-		if err != nil {
-			return err
+		rel, relErr := filepath.Rel(localDir, path)
+		if relErr != nil {
+			return relErr
 		}
 
 		key := prefix + rel
 
-		f, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("open %s: %w", rel, err)
+		//nolint:gosec // CLI sidecar: path from WalkDir callback in trusted localDir
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return fmt.Errorf("open %s: %w", rel, openErr)
 		}
 		defer f.Close()
 
-		_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
+		_, putErr := s3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: &bucket,
 			Key:    &key,
 			Body:   f,
 		})
-		if err != nil {
-			return fmt.Errorf("upload %s: %w", rel, err)
+		if putErr != nil {
+			return fmt.Errorf("upload %s: %w", rel, putErr)
 		}
 
 		fmt.Fprintf(os.Stderr, "  uploaded %s\n", rel)
@@ -213,11 +239,11 @@ func cmdUpload(args []string) {
 		return nil
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "upload: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("%w: %w", errUploadFailed, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Uploaded %d files.\n", fileCount)
+	return nil
 }
 
 // --- S3 helpers ---
@@ -283,10 +309,12 @@ func downloadFile(ctx context.Context, client *s3.Client, bucket, key, dataDir, 
 	defer resp.Body.Close()
 
 	dstPath := filepath.Join(dataDir, rel)
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-		return err
+	//nolint:gosec // CLI sidecar: dstPath derived from trusted dataDir + rel
+	if mErr := os.MkdirAll(filepath.Dir(dstPath), 0o755); mErr != nil {
+		return mErr
 	}
 
+	//nolint:gosec // CLI sidecar: dstPath derived from trusted dataDir + rel
 	f, err := os.Create(dstPath)
 	if err != nil {
 		return err
@@ -307,7 +335,7 @@ func deref(s *string) string {
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] == '\n' {
 			lines = append(lines, s[start:i])
 			start = i + 1
@@ -320,10 +348,10 @@ func splitLines(s string) []string {
 }
 
 func trimSpace(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\r') {
+	for s != "" && (s[0] == ' ' || s[0] == '\t' || s[0] == '\r') {
 		s = s[1:]
 	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t' || s[len(s)-1] == '\r') {
+	for s != "" && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t' || s[len(s)-1] == '\r') {
 		s = s[:len(s)-1]
 	}
 	return s
@@ -383,10 +411,17 @@ func cmdFinish(args []string) {
 		os.Exit(1)
 	}
 
+	if err := doFinish(outputDir, fingerprint, stderrFile, exitCode, uploadOk); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+func doFinish(outputDir, fingerprint, stderrFile string, exitCode int, uploadOk bool) error {
 	webhookURL := os.Getenv("COACH_WEBHOOK_URL")
 	if webhookURL == "" {
 		fmt.Fprintf(os.Stderr, "COACH_WEBHOOK_URL not set, skipping finish hook\n")
-		return
+		return nil
 	}
 
 	payload := finishPayload{
@@ -396,6 +431,7 @@ func cmdFinish(args []string) {
 	}
 
 	if exitCode != 0 && stderrFile != "" {
+		//nolint:gosec // CLI sidecar: stderrFile comes from container entrypoint args
 		if raw, err := os.ReadFile(stderrFile); err == nil {
 			msg := strings.TrimSpace(string(raw))
 			if runes := []rune(msg); len(runes) > 256 {
@@ -407,11 +443,13 @@ func cmdFinish(args []string) {
 	}
 
 	const maxFileSize = 1 << 20 // 1 MiB
+	//nolint:gosec // CLI sidecar: outputDir comes from container entrypoint args
 	if metricsData, err := os.ReadFile(filepath.Join(outputDir, "metrics.json")); err == nil && len(metricsData) <= maxFileSize && json.Valid(metricsData) {
 		payload.Metrics = metricsData
 		fmt.Fprintf(os.Stderr, "finish hook: loaded metrics.json\n")
 	}
 
+	//nolint:gosec // CLI sidecar: outputDir comes from container entrypoint args
 	if metaData, err := os.ReadFile(filepath.Join(outputDir, "meta.json")); err == nil && len(metaData) <= maxFileSize && json.Valid(metaData) {
 		payload.Meta = metaData
 		fmt.Fprintf(os.Stderr, "finish hook: loaded meta.json\n")
@@ -419,31 +457,30 @@ func cmdFinish(args []string) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "finish hook: marshal payload: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("%w: %w", errFinishMarshal, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	//nolint:gosec // SSRF false positive: webhookURL set by trusted wrapper via COACH_WEBHOOK_URL env var
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "finish hook: create request: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("%w: %w", errFinishRequest, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	//nolint:gosec // SSRF false positive: same trusted COACH_WEBHOOK_URL env var
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "finish hook: POST failed: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("%w: %w", errFinishPost, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		fmt.Fprintf(os.Stderr, "finish hook: got HTTP %d\n", resp.StatusCode)
-		os.Exit(1)
+		return fmt.Errorf("%w: %d", errFinishHTTP, resp.StatusCode)
 	}
 
 	fmt.Fprintf(os.Stderr, "finish hook: posted successfully (%d)\n", resp.StatusCode)
+	return nil
 }

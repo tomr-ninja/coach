@@ -20,10 +20,11 @@ import (
 )
 
 var (
-	errImageNotLocal  = errors.New("model image must be available locally; pull it first with docker pull")
-	errNoSubmitResult = errors.New("driver returned no submit result")
-	errNoListResult   = errors.New("driver returned no list result")
-	errNoStatusResult = errors.New("driver returned no status result")
+	errImageNotLocal      = errors.New("model image must be available locally; pull it first with docker pull")
+	errNoSubmitResult     = errors.New("driver returned no submit result")
+	errNoListResult       = errors.New("driver returned no list result")
+	errNoStatusResult     = errors.New("driver returned no status result")
+	errInvalidImageDigest = errors.New("invalid image digest")
 )
 
 // RemoteRun submits a one-off training job to a remote backend.
@@ -69,8 +70,9 @@ func RemoteRun(
 		return "", fmt.Errorf("validate driver: %w", err)
 	}
 
-	if err := validate.LocalVsS3(dataSource, outputURI); err != nil {
-		return "", err
+	vErr := validate.LocalVsS3(dataSource, outputURI)
+	if vErr != nil {
+		return "", vErr
 	}
 
 	client, err := docker.NewClient()
@@ -183,8 +185,9 @@ func RemoteSchedule(
 		return "", fmt.Errorf("validate driver: %w", err)
 	}
 
-	if err := validate.LocalVsS3(dataSource, outputURI); err != nil {
-		return "", err
+	vErr := validate.LocalVsS3(dataSource, outputURI)
+	if vErr != nil {
+		return "", vErr
 	}
 
 	client, err := docker.NewClient()
@@ -361,13 +364,13 @@ func resolveS3ArtifactFingerprint(
 	imageDigestHex, dataSource, outputURI string,
 	cfg *config.Config,
 	force bool,
-) ([32]byte, string, error) {
+) (fingerprint [32]byte, s3PathOutPrefix string, err error) {
 	digestBytes, err := hex.DecodeString(imageDigestHex)
 	if err != nil {
 		return [32]byte{}, "", fmt.Errorf("invalid image digest hex: %w", err)
 	}
 	if len(digestBytes) != 32 {
-		return [32]byte{}, "", fmt.Errorf("invalid image digest: expected 32 bytes, got %d", len(digestBytes))
+		return [32]byte{}, "", fmt.Errorf("%w: expected 32 bytes, got %d", errInvalidImageDigest, len(digestBytes))
 	}
 	var imageDigest [32]byte
 	copy(imageDigest[:], digestBytes)
@@ -377,10 +380,10 @@ func resolveS3ArtifactFingerprint(
 		return [32]byte{}, "", fmt.Errorf("resolve data checksums: %w", err)
 	}
 
-	fingerprint := artifact.Fingerprint(imageDigest, dataChecksums)
+	fingerprint = artifact.Fingerprint(imageDigest, dataChecksums)
 	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 
-	s3PathOutPrefix := strings.TrimPrefix(outputURI, "s3://")
+	s3PathOutPrefix = strings.TrimPrefix(outputURI, "s3://")
 	if !strings.HasSuffix(s3PathOutPrefix, "/") {
 		s3PathOutPrefix += "/"
 	}

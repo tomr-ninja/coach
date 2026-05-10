@@ -19,6 +19,8 @@ import (
 	"github.com/tomr-ninja/coach/protocol"
 )
 
+const cmdRun = "run"
+
 func signalContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1)
@@ -71,7 +73,7 @@ func main() {
 	}
 
 	switch cmd.Command() {
-	case "run":
+	case cmdRun:
 		var data, output string
 		var force bool
 
@@ -143,7 +145,7 @@ func main() {
 				fmt.Println(s)
 			}
 
-		case "run":
+		case cmdRun:
 			var data, output string
 
 			scriptRunFlags := flag.NewFlagSet("script run", flag.ExitOnError)
@@ -210,7 +212,7 @@ func main() {
 		}
 
 		switch cmd.Command() {
-		case "run":
+		case cmdRun:
 			var (
 				dataSource, outputURI, script string
 				force                         bool

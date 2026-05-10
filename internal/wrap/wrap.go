@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -26,8 +27,12 @@ var (
 	dockerfileTemplate string
 )
 
-// ErrNoRegistry is returned when a registry is required but not configured.
-var ErrNoRegistry = fmt.Errorf("registry is required for remote S3 runs (set in coach.json)")
+var (
+	// ErrNoRegistry is returned when a registry is required but not configured.
+	ErrNoRegistry = errors.New("registry is required for remote S3 runs (set in coach.json)")
+
+	errGoModNotFound = errors.New("go.mod not found in any parent directory")
+)
 
 // Image builds a wrapper Docker image on top of the base model image.
 //
@@ -53,16 +58,20 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registry
 	if err != nil {
 		return "", fmt.Errorf("find module root: %w", err)
 	}
-	if err := copyFile(filepath.Join(moduleRoot, "go.mod"), filepath.Join(tmpDir, "go.mod")); err != nil {
+	err = copyFile(filepath.Join(moduleRoot, "go.mod"), filepath.Join(tmpDir, "go.mod"))
+	if err != nil {
 		return "", fmt.Errorf("copy go.mod: %w", err)
 	}
-	if err := copyFile(filepath.Join(moduleRoot, "go.sum"), filepath.Join(tmpDir, "go.sum")); err != nil {
+	err = copyFile(filepath.Join(moduleRoot, "go.sum"), filepath.Join(tmpDir, "go.sum"))
+	if err != nil {
 		return "", fmt.Errorf("copy go.sum: %w", err)
 	}
-	if err := copyDir(filepath.Join(moduleRoot, "internal", "artifact"), filepath.Join(tmpDir, "internal", "artifact")); err != nil {
+	err = copyDir(filepath.Join(moduleRoot, "internal", "artifact"), filepath.Join(tmpDir, "internal", "artifact"))
+	if err != nil {
 		return "", fmt.Errorf("copy internal/artifact: %w", err)
 	}
-	if err := copyDir(filepath.Join(moduleRoot, "cmd", "coach-sidecar"), filepath.Join(tmpDir, "cmd", "coach-sidecar")); err != nil {
+	err = copyDir(filepath.Join(moduleRoot, "cmd", "coach-sidecar"), filepath.Join(tmpDir, "cmd", "coach-sidecar"))
+	if err != nil {
 		return "", fmt.Errorf("copy cmd/coach-sidecar: %w", err)
 	}
 
@@ -215,7 +224,7 @@ func moduleRootDir() (string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("go.mod not found in any parent directory")
+			return "", errGoModNotFound
 		}
 		dir = parent
 	}
