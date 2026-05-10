@@ -74,7 +74,7 @@ type Spec struct {
 
 ```go
 type Job struct {
-    Fingerprint string            `json:"fingerprint"`           // artifact fingerprint hex
+    ImageDigest string            `json:"imageDigest"`           // model image digest
     Name        string            `json:"name"`                  // e.g. "coach-container-runner-my-model-v1"
     IsWrapped   bool              `json:"isWrapped"`             // image includes S3 wrapper entrypoint
     IsRecurring bool              `json:"isRecurring"`           // true for scheduled, false for one-off
@@ -173,7 +173,7 @@ type DriverResult struct {
   "protocolVersion": 1,
   "type": "submit",
   "job": {
-    "fingerprint": "abc123",
+    "imageDigest": "abc123",
     "name": "coach-container-runner-my-model-v1",
     "isRecurring": false,
     "isWrapped": true,
