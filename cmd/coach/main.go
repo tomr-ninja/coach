@@ -38,11 +38,12 @@ func main() {
 	root.Subcommand("cleanup")
 	root.Subcommand("run")
 
-	schedule := root.Subcommand("schedule")
-	schedule.Subcommand("create")
-	schedule.Subcommand("ls")
-	schedule.Subcommand("delete")
-	schedule.Subcommand("status")
+	remote := root.Subcommand("remote")
+	remote.Subcommand("run")
+	remote.Subcommand("schedule")
+	remote.Subcommand("ls")
+	remote.Subcommand("delete")
+	remote.Subcommand("status")
 
 	script := root.Subcommand("script")
 	script.Subcommand("ls")
@@ -194,52 +195,117 @@ func main() {
 				fmt.Sprintf("unknown script subcommand: %s\nusage: coach script <ls|run>", cmd.Command())))
 		}
 
-	case "schedule":
+	case "remote":
 		var backend string
 
-		schedFlags := flag.NewFlagSet("schedule", flag.ExitOnError)
-		schedFlags.StringVar(&backend, "backend", "", "Backend name from coach.json")
-		if err := schedFlags.Parse(cmd.Args()); err != nil {
+		remoteFlags := flag.NewFlagSet("remote", flag.ExitOnError)
+		remoteFlags.StringVar(&backend, "backend", "", "Backend name from coach.json")
+		if err := remoteFlags.Parse(cmd.Args()); err != nil {
 			handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 		}
 
 		if !cmd.Next() {
 			handleError(coacherrors.New(coacherrors.KindUser,
-				"usage: coach schedule [-backend <name>] <create|ls|delete|status> [<args>]"))
+				"usage: coach remote [-backend <name>] <run|schedule|ls|delete|status> [<args>]"))
 		}
 
 		switch cmd.Command() {
-		case "create":
+		case "run":
+			var (
+				dataSource, outputURI, script string
+				force                         bool
+				cpu, memory, gpu, gpuType     string
+				command, labels               sliceFlag
+			)
+
+			runFlags := flag.NewFlagSet("remote run", flag.ExitOnError)
+			runFlags.StringVar(&dataSource, "data", "", "Data source (local path or s3://bucket/prefix)")
+			runFlags.StringVar(&outputURI, "output", "", "Output destination URI")
+			runFlags.BoolVar(&force, "force", false, "Override existing artifact")
+			runFlags.Var(&command, "command", "Container command override (repeatable)")
+			runFlags.StringVar(&script, "script", "", "Script name inside /scripts/")
+			runFlags.StringVar(&cpu, "cpu", "", "CPU resources")
+			runFlags.StringVar(&memory, "memory", "", "Memory resources")
+			runFlags.StringVar(&gpu, "gpu", "", "GPU count")
+			runFlags.StringVar(&gpuType, "gpu-type", "", "GPU type")
+			runFlags.Var(&labels, "label", "Label key=value (repeatable)")
+			if err := runFlags.Parse(cmd.Args()); err != nil {
+				handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
+			}
+
+			posArgs := runFlags.Args()
+			if len(posArgs) < 1 {
+				handleError(coacherrors.New(coacherrors.KindUser,
+					"usage: coach remote [-backend <name>] run [flags] <model-image>"))
+			}
+			modelImage := posArgs[0]
+
+			if dataSource == "" || outputURI == "" {
+				handleError(coacherrors.New(coacherrors.KindUser, "flags -data and -output are required"))
+			}
+
+			if err := validate.ModelImage(modelImage); err != nil {
+				handleError(err)
+			}
+			if err := validate.DirPath(dataSource); err != nil {
+				handleError(fmt.Errorf("validate data path: %w", err))
+			}
+			if err := validate.DirPath(outputURI); err != nil {
+				handleError(fmt.Errorf("validate output dir: %w", err))
+			}
+			if script != "" {
+				if err := validate.ScriptName(script); err != nil {
+					handleError(err)
+				}
+			}
+
+			labelMap := parseLabels(labels)
+			resources := protocol.ParseResources(cpu, memory, gpu, gpuType)
+			ctx, cancel := signalContext()
+			defer cancel()
+			if verbose {
+				ctx = coach.WithVerbose(ctx)
+			}
+			id, err := coach.RemoteRun(ctx, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
+			if err != nil {
+				handleError(err)
+			}
+			fmt.Println(id)
+
+		case "schedule":
 			var (
 				dataSource, outputURI, sched, script string
 				cpu, memory, gpu, gpuType            string
 				command, labels                      sliceFlag
 			)
 
-			createFlags := flag.NewFlagSet("schedule create", flag.ExitOnError)
-			createFlags.StringVar(&dataSource, "data", "", "Data source (local path or s3://bucket/prefix)")
-			createFlags.StringVar(&outputURI, "output", "", "Output destination URI")
-			createFlags.StringVar(&sched, "schedule", "", "Cron expression for recurring runs (omit for one-off)")
-			createFlags.Var(&command, "command", "Container command override (repeatable)")
-			createFlags.StringVar(&script, "script", "", "Script name inside /scripts/")
-			createFlags.StringVar(&cpu, "cpu", "", "CPU resources")
-			createFlags.StringVar(&memory, "memory", "", "Memory resources")
-			createFlags.StringVar(&gpu, "gpu", "", "GPU count")
-			createFlags.StringVar(&gpuType, "gpu-type", "", "GPU type")
-			createFlags.Var(&labels, "label", "Label key=value (repeatable)")
-			if err := createFlags.Parse(cmd.Args()); err != nil {
+			schedFlags := flag.NewFlagSet("remote schedule", flag.ExitOnError)
+			schedFlags.StringVar(&dataSource, "data", "", "Data source (local path or s3://bucket/prefix)")
+			schedFlags.StringVar(&outputURI, "output", "", "Output destination URI")
+			schedFlags.StringVar(&sched, "schedule", "", "Cron expression for recurring runs (required)")
+			schedFlags.Var(&command, "command", "Container command override (repeatable)")
+			schedFlags.StringVar(&script, "script", "", "Script name inside /scripts/")
+			schedFlags.StringVar(&cpu, "cpu", "", "CPU resources")
+			schedFlags.StringVar(&memory, "memory", "", "Memory resources")
+			schedFlags.StringVar(&gpu, "gpu", "", "GPU count")
+			schedFlags.StringVar(&gpuType, "gpu-type", "", "GPU type")
+			schedFlags.Var(&labels, "label", "Label key=value (repeatable)")
+			if err := schedFlags.Parse(cmd.Args()); err != nil {
 				handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 			}
 
-			posArgs := createFlags.Args()
+			posArgs := schedFlags.Args()
 			if len(posArgs) < 1 {
 				handleError(coacherrors.New(coacherrors.KindUser,
-					"usage: coach schedule [-backend <name>] create [flags] <model-image>"))
+					"usage: coach remote [-backend <name>] schedule [flags] <model-image>"))
 			}
 			modelImage := posArgs[0]
 
 			if dataSource == "" || outputURI == "" {
 				handleError(coacherrors.New(coacherrors.KindUser, "flags -data and -output are required"))
+			}
+			if sched == "" {
+				handleError(coacherrors.New(coacherrors.KindUser, "-schedule is required for recurring runs (use 'remote run' for one-off)"))
 			}
 
 			if err := validate.ModelImage(modelImage); err != nil {
@@ -267,7 +333,7 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			id, err := coach.ScheduleCreate(ctx, backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
+			id, err := coach.RemoteSchedule(ctx, backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
 			if err != nil {
 				handleError(err)
 			}
@@ -279,14 +345,14 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			entries, err := coach.ScheduleList(ctx, backend)
+			entries, err := coach.RemoteList(ctx, backend)
 			if err != nil {
 				handleError(err)
 			}
 			for _, e := range entries {
 				b, err := json.Marshal(e)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: marshal schedule entry: %v\n", err)
+					fmt.Fprintf(os.Stderr, "warning: marshal entry: %v\n", err)
 					continue
 				}
 				fmt.Println(string(b))
@@ -295,7 +361,7 @@ func main() {
 		case "delete":
 			if len(cmd.Args()) < 1 {
 				handleError(coacherrors.New(coacherrors.KindUser,
-					"usage: coach schedule [-backend <name>] delete <id>"))
+					"usage: coach remote [-backend <name>] delete <id>"))
 			}
 			id := cmd.Args()[0]
 			ctx, cancel := signalContext()
@@ -303,14 +369,14 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			if err := coach.ScheduleDelete(ctx, backend, id); err != nil {
+			if err := coach.RemoteDelete(ctx, backend, id); err != nil {
 				handleError(err)
 			}
 
 		case "status":
 			if len(cmd.Args()) < 1 {
 				handleError(coacherrors.New(coacherrors.KindUser,
-					"usage: coach schedule [-backend <name>] status <id>"))
+					"usage: coach remote [-backend <name>] status <id>"))
 			}
 			id := cmd.Args()[0]
 			ctx, cancel := signalContext()
@@ -318,7 +384,7 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			status, err := coach.ScheduleStatus(ctx, backend, id)
+			status, err := coach.RemoteStatus(ctx, backend, id)
 			if err != nil {
 				handleError(err)
 			}
@@ -333,7 +399,7 @@ func main() {
 
 		default:
 			handleError(coacherrors.New(coacherrors.KindUser,
-				fmt.Sprintf("unknown schedule subcommand: %s\nusage: coach schedule <create|ls|delete|status>", cmd.Command())))
+				fmt.Sprintf("unknown remote subcommand: %s\nusage: coach remote <run|schedule|ls|delete|status>", cmd.Command())))
 		}
 
 	case "cleanup":
@@ -373,7 +439,7 @@ func main() {
 
 	default:
 		handleError(coacherrors.New(coacherrors.KindUser,
-			fmt.Sprintf("unknown command: %s\ncommands: run, script, schedule, cleanup", cmd.Command())))
+			fmt.Sprintf("unknown command: %s\ncommands: run, script, remote, cleanup", cmd.Command())))
 	}
 }
 

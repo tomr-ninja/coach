@@ -2,7 +2,6 @@ package coach
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"github.com/tomr-ninja/coach/docker"
 	"github.com/tomr-ninja/coach/internal/artifact"
 	"github.com/tomr-ninja/coach/internal/config"
-	"github.com/tomr-ninja/coach/internal/storage"
 	"github.com/tomr-ninja/coach/internal/utils"
 	"github.com/tomr-ninja/coach/internal/validate"
 	"github.com/tomr-ninja/coach/internal/wrap"
@@ -122,37 +120,12 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 		return artifact.Zero, fmt.Errorf("resolve image digest: %w", err)
 	}
 
-	// Resolve fingerprint from S3 data checksums to detect duplicate runs.
-	dataChecksums, err := storage.Checksums(s3DataSource, cfg)
+	fingerprint, s3PathOutPrefix, err := resolveS3ArtifactFingerprint(ctx, imageDigestHex, s3DataSource, s3OutputDir, cfg, force)
 	if err != nil {
-		return artifact.Zero, fmt.Errorf("resolve data checksums: %w", err)
+		return artifact.Zero, err
 	}
-
-	digestBytes, err := hex.DecodeString(imageDigestHex)
-	if err != nil || len(digestBytes) != 32 {
-		return artifact.Zero, fmt.Errorf("invalid image digest: %w", err)
-	}
-	var imageDigest [32]byte
-	copy(imageDigest[:], digestBytes)
-
-	fingerprint := artifact.Fingerprint(imageDigest, dataChecksums)
-	fingerprintHex := fmt.Sprintf("%x", fingerprint)
 
 	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
-	s3PathOutPrefix := strings.TrimPrefix(s3OutputDir, "s3://")
-	if !strings.HasSuffix(s3PathOutPrefix, "/") {
-		s3PathOutPrefix += "/"
-	}
-
-	if !force {
-		exists, err := storage.ArtifactExists(ctx, cfg, s3PathOutPrefix+fingerprintHex)
-		if err != nil {
-			return artifact.Zero, fmt.Errorf("check artifact exists: %w", err)
-		}
-		if exists {
-			return artifact.Zero, fmt.Errorf("%w: s3://%s%s", artifact.ErrExists, s3PathOutPrefix, fingerprintHex)
-		}
-	}
 
 	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
 	if err := wrapAndRunS3(ctx, client, modelImage, imageDigestHex, envVars); err != nil {

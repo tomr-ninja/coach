@@ -19,9 +19,11 @@ coach [--verbose]
 ├── script
 │   ├── ls <model-image>
 │   └── run [-data] [-output] <model-image> <script> [args...]
-└── schedule [-backend]
-    ├── create [-data] [-output] [-schedule] [-command]... [-script]
-    │          [-cpu] [-memory] [-gpu] [-gpu-type] [-label]... <model-image>
+└── remote [-backend]
+    ├── run [-data] [-output] [-force] [-command]... [-script]
+    │       [-cpu] [-memory] [-gpu] [-gpu-type] [-label]... <model-image>
+    ├── schedule [-data] [-output] [-schedule] [-command]... [-script]
+    │            [-cpu] [-memory] [-gpu] [-gpu-type] [-label]... <model-image>
     ├── ls
     ├── delete <id>
     └── status <id>
@@ -94,11 +96,20 @@ Example:
 coach cleanup --older 7d
 ```
 
-## Scheduling on remote backends
+## Remote backends
 
-`coach schedule` submits training jobs to remote backends (Prefect, Scaleway, Vertex AI, etc.) via external driver executables.
+`coach remote` submits training jobs to remote backends (Prefect, Scaleway, Nebius, etc.) via external driver executables.
 Coach contains zero backend-specific code — each backend has its own driver that translates a standard JSON job spec
 into the backend's API.
+
+Two modes are supported:
+
+- **`remote run`** — one-off execution. The artifact fingerprint is pre-computed from the current S3 data state
+  at submit time. If the artifact already exists, the command exits immediately with an error
+  (use `--force` to override).
+- **`remote schedule`** — recurring execution. The fingerprint is computed at each run time from the
+  actual data present. If a run produces a fingerprint that already exists, the job fails early — no new data,
+  nothing to produce.
 
 ### Configuration (coach.json)
 
@@ -147,12 +158,35 @@ Create a `coach.json` in your project root or `~/.config/coach/`:
 
 All values starting with `$` (like `$S3_ACCESS_KEY_ID`) are expanded from environment variables at load time.
 
-### Schedule commands
+### Remote commands
 
-**Create a scheduled or one-off run:**
+**Run a one-off job:**
 
 ```shell
-coach schedule --backend prefect create \
+coach remote --backend prefect run \
+  --data s3://my-bucket/training-data/ \
+  --output s3://my-bucket/output/ \
+  --cpu 4 \
+  --memory 16Gi \
+  --gpu 1 \
+  --gpu-type T4 \
+  --label env=prod \
+  my-model:v1
+```
+
+`-backend` goes on the `remote` command itself, before the subcommand.
+`-data` accepts a single source (local path or `s3://` URI).
+Data source and output must either both be local or both be S3 — mixing is not allowed.
+`-script` runs a named script from `/scripts/` in the container; `-command` passes additional command args
+(e.g. `-command python -command -u -command train.py`). The model image is a positional argument.
+
+If the artifact fingerprint already exists at the output destination, the command exits with an error before
+submitting anything. Pass `--force` to override and re-run.
+
+**Create a recurring schedule:**
+
+```shell
+coach remote --backend prefect schedule \
   --data s3://my-bucket/training-data/ \
   --output s3://my-bucket/output/ \
   --schedule "0 */6 * * *" \
@@ -164,16 +198,12 @@ coach schedule --backend prefect create \
   my-model:v1
 ```
 
-`-backend` goes on the `schedule` command itself, before the subcommand. Omit `-schedule` for a one-off run.
-`-data` accepts a single source (local path or `s3://` URI).
-Data source and output must either both be local or both be S3 — mixing is not allowed.
-`-script` runs a named script from `/scripts/` in the container; `-command` passes additional command args
-(e.g. `-command python -command -u -command train.py`). The model image is a positional argument.
+`--schedule` is required for recurring runs. Omit it and use `remote run` for one-off jobs.
 
-**List scheduled runs:**
+**List jobs and schedules:**
 
 ```shell
-coach schedule --backend prefect ls
+coach remote --backend prefect ls
 ```
 
 Output is NDJSON (one JSON object per line).
@@ -181,13 +211,13 @@ Output is NDJSON (one JSON object per line).
 **Check run status:**
 
 ```shell
-coach schedule --backend prefect status <run-id>
+coach remote --backend prefect status <run-id>
 ```
 
-**Delete a scheduled run:**
+**Delete a job or schedule:**
 
 ```shell
-coach schedule --backend prefect delete <run-id>
+coach remote --backend prefect delete <run-id>
 ```
 
 ### Container bridge — how S3 wrapping works
@@ -287,7 +317,7 @@ With this `coach.json`:
 ```
 
 ```shell
-coach schedule --backend prefect create \
+coach remote --backend prefect run \
   --data s3://my-bucket/training-data/ \
   --output s3://my-bucket/output/ \
   --cpu 4 --memory 16Gi \
@@ -316,6 +346,10 @@ The driver receives:
 ```
 
 The driver creates a container from this image, injects these env vars, and starts it. The entrypoint script handles everything else.
+
+For recurring schedules, the sidecar computes the fingerprint at each execution. For one-off runs (`remote run`),
+the fingerprint is also computed at runtime (for upload path consistency), but Coach pre-checks it at submit time
+and refuses to submit if the artifact already exists — use `--force` to override.
 
 ### Finish webhook
 
