@@ -34,65 +34,62 @@ var (
 // already exists, the command exits early unless force is true.
 func RemoteRun(
 	ctx context.Context,
+	cfg *config.Config,
 	backendName, modelImage, dataSource, outputURI string,
 	command []string,
 	script string,
 	resources protocol.Resources,
 	labels map[string]string,
 	force bool,
-) (string, error) {
-	if err := validate.ModelImage(modelImage); err != nil {
-		return "", fmt.Errorf("validate model image: %w", err)
+) (id string, logS3URI string, err error) {
+	if verr := validate.ModelImage(modelImage); verr != nil {
+		return "", "", fmt.Errorf("validate model image: %w", verr)
 	}
-	if err := validate.DirPath(dataSource); err != nil {
-		return "", fmt.Errorf("validate data source: %w", err)
+	if verr := validate.DirPath(dataSource); verr != nil {
+		return "", "", fmt.Errorf("validate data source: %w", verr)
 	}
-	if err := validate.DirPath(outputURI); err != nil {
-		return "", fmt.Errorf("validate output destination: %w", err)
+	if verr := validate.DirPath(outputURI); verr != nil {
+		return "", "", fmt.Errorf("validate output destination: %w", verr)
 	}
 	if script != "" {
-		if err := validate.ScriptName(script); err != nil {
-			return "", fmt.Errorf("validate script name: %w", err)
+		if verr := validate.ScriptName(script); verr != nil {
+			return "", "", fmt.Errorf("validate script name: %w", verr)
 		}
-	}
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return "", fmt.Errorf("load config: %w", err)
 	}
 
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if err = driver.Validate(backend.Driver); err != nil {
-		return "", fmt.Errorf("validate driver: %w", err)
+		return "", "", fmt.Errorf("validate driver: %w", err)
 	}
 
 	vErr := validate.LocalVsS3(dataSource, outputURI)
 	if vErr != nil {
-		return "", vErr
+		return "", "", vErr
 	}
 
 	client, err := docker.NewClient()
 	if err != nil {
-		return "", fmt.Errorf("create docker client: %w", err)
+		return "", "", fmt.Errorf("create docker client: %w", err)
 	}
 	defer client.Close()
 
 	imageDigestHex, err := resolveImageDigestHex(ctx, client, modelImage)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	var model protocol.Model
 	var wrappedImage string
+	var fpHex string
 
 	if strings.HasPrefix(dataSource, "s3://") {
-		model, wrappedImage, err = wrapModelForRemoteRun(ctx, client, modelImage, imageDigestHex, dataSource, outputURI, cfg, command, script, backend.Platform, force)
+		model, wrappedImage, fpHex, err = wrapModelForRemoteRun(ctx, client, modelImage, imageDigestHex, dataSource, outputURI, cfg, command, script, backend.Platform, force)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 	} else {
 		model = protocol.Model{
@@ -126,17 +123,26 @@ func RemoteRun(
 				fmt.Fprintf(os.Stderr, "warning: cleanup wrapper image %s: %v\n", wrappedImage, rmErr)
 			}
 		}
-		return "", fmt.Errorf("invoke driver: %w", err)
+		return "", "", fmt.Errorf("invoke driver: %w", err)
 	}
 
 	if result.SubmitResult == nil {
-		return "", errNoSubmitResult
+		return "", "", errNoSubmitResult
 	}
 	if err := validate.SubmitResult(result.SubmitResult); err != nil {
-		return "", fmt.Errorf("validate submit result: %w", err)
+		return "", "", fmt.Errorf("validate submit result: %w", err)
 	}
 
-	return result.SubmitResult.ID, nil
+	// Build S3 log path for --watch.
+	if fpHex != "" {
+		outputPrefix := strings.TrimPrefix(outputURI, "s3://")
+		if !strings.HasSuffix(outputPrefix, "/") {
+			outputPrefix += "/"
+		}
+		logS3URI = fmt.Sprintf("s3://%s%s/.coach/log.txt", outputPrefix, fpHex)
+	}
+
+	return result.SubmitResult.ID, logS3URI, nil
 }
 
 // RemoteSchedule submits a recurring training schedule to a remote backend.
@@ -419,39 +425,38 @@ func wrapModelForRemoteRun(
 	script string,
 	targetPlatform string,
 	force bool,
-) (protocol.Model, string, error) {
+) (model protocol.Model, wrapperID string, s3PathOutPrefix string, err error) {
 	if cfg.Registry == "" {
-		return protocol.Model{}, "", wrap.ErrNoRegistry
+		return protocol.Model{}, "", "", wrap.ErrNoRegistry
 	}
 
-	_, s3PathOutPrefix, err := resolveS3ArtifactFingerprint(ctx, imageDigestHex, dataSource, outputURI, cfg, force)
+	fp, s3PathOutPrefix, err := resolveS3ArtifactFingerprint(ctx, imageDigestHex, dataSource, outputURI, cfg, force)
 	if err != nil {
-		return protocol.Model{}, "", err
+		return protocol.Model{}, "", "", err
 	}
+	fpHex := fmt.Sprintf("%x", fp)
 
-	// Build the wrapper image — same approach as scheduled runs,
-	// the sidecar computes the fingerprint independently at execution time.
 	s3PathIn := strings.TrimPrefix(dataSource, "s3://")
 	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
 
 	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
 	if err != nil {
-		return protocol.Model{}, "", fmt.Errorf("inspect image entrypoint: %w", err)
+		return protocol.Model{}, "", "", fmt.Errorf("inspect image entrypoint: %w", err)
 	}
 
 	wrappedImage, err := wrap.Image(ctx, client, modelImage, cfg.Registry, cfg.RegistryAuth.Reveal(), targetPlatform, entrypoint)
 	if err != nil {
-		return protocol.Model{}, "", fmt.Errorf("wrap image: %w", err)
+		return protocol.Model{}, "", "", fmt.Errorf("wrap image: %w", err)
 	}
 
-	model := protocol.Model{
+	model = protocol.Model{
 		Image:   wrappedImage,
 		Command: command,
 		Script:  script,
 		EnvVars: envVars,
 	}
 
-	return model, wrappedImage, nil
+	return model, wrappedImage, fpHex, nil
 }
 
 // wrapModelForS3Schedule builds an S3 wrapper image for a scheduled job.

@@ -14,6 +14,7 @@ import (
 	"github.com/tomr-ninja/flag3"
 
 	"github.com/tomr-ninja/coach"
+	"github.com/tomr-ninja/coach/internal/config"
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 	"github.com/tomr-ninja/coach/internal/validate"
 	"github.com/tomr-ninja/coach/protocol"
@@ -215,7 +216,7 @@ func main() {
 		case cmdRun:
 			var (
 				dataSource, outputURI, script string
-				force                         bool
+				force, watch                  bool
 				cpu, memory, gpu, gpuType     string
 				command, labels               sliceFlag
 			)
@@ -224,6 +225,7 @@ func main() {
 			runFlags.StringVar(&dataSource, "data", "", "Data source (local path or s3://bucket/prefix)")
 			runFlags.StringVar(&outputURI, "output", "", "Output destination URI")
 			runFlags.BoolVar(&force, "force", false, "Override existing artifact")
+			runFlags.BoolVar(&watch, "watch", false, "Watch remote logs after submission")
 			runFlags.Var(&command, "command", "Container command override (repeatable)")
 			runFlags.StringVar(&script, "script", "", "Script name inside /scripts/")
 			runFlags.StringVar(&cpu, "cpu", "", "CPU resources")
@@ -268,11 +270,19 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			id, err := coach.RemoteRun(ctx, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
+			cfg, err := config.LoadConfig()
+			if err != nil {
+				handleError(fmt.Errorf("load config: %w", err))
+			}
+			id, logS3URI, err := coach.RemoteRun(ctx, cfg, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
 			if err != nil {
 				handleError(err)
 			}
 			fmt.Println(id)
+
+			if watch {
+				coach.WatchS3Log(ctx, cfg, logS3URI)
+			}
 
 		case "schedule":
 			var (

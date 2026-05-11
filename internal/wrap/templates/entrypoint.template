@@ -1,48 +1,110 @@
 #!/bin/sh
 
+set -o pipefail
+
 DATA_DIR="/data"
 OUTPUT_DIR="/output"
+LOG_FILE="$OUTPUT_DIR/.coach/log.txt"
+S3_PATH_FILE="/tmp/coach-s3-path-out"
 STDERR_FILE="/tmp/stderr.txt"
+
 if ! mkdir -p "$DATA_DIR" "$OUTPUT_DIR"; then
   echo "ERROR: failed to create data/output directories" >&2
+  exit 1
+fi
+
+run_phases() {
+  FP=""
   APP_EXIT_CODE=1
-fi
+  UPLOAD_OK="false"
+  LOG_UPLOAD_PID=""
 
-FP=""
-APP_EXIT_CODE=1
-UPLOAD_OK="false"
-
-echo "--- Phase 1: Fetching data and computing fingerprint ---"
-if fetch_output=$(coach-sidecar fetch --source "s3://${S3_PATH_IN}" --digest "$COACH_IMAGE_DIGEST" "$DATA_DIR" 2>"$STDERR_FILE"); then
-  FP="$fetch_output"
-  S3_PATH_OUT="${S3_PATH_OUT_PREFIX}${FP}"
-  echo "Fingerprint: $FP"
-else
-  APP_EXIT_CODE=$?
-  echo "ERROR: Phase 1 fetch failed (exit code $APP_EXIT_CODE)" >&2
-fi
-
-if [ -n "$FP" ]; then
-  echo "--- Phase 2: Running Application ---"
-  {{.RunCommand}} 2>"$STDERR_FILE"
-  APP_EXIT_CODE=$?
-
-  echo "--- Phase 3: Uploading output to S3 ---"
-  if coach-sidecar upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"; then
-    UPLOAD_OK="true"
+  echo "--- Phase 1: Fetching data and computing fingerprint ---"
+  if fetch_output=$(coach-sidecar fetch --source "s3://${S3_PATH_IN}" --digest "$COACH_IMAGE_DIGEST" "$DATA_DIR"); then
+    FP="$fetch_output"
+    S3_PATH_OUT="${S3_PATH_OUT_PREFIX}${FP}"
+    echo "$S3_PATH_OUT" > "$S3_PATH_FILE"
+    echo "Fingerprint: $FP"
   else
-    upload_rc=$?
-    echo "WARNING: S3 upload failed (exit code $upload_rc), preserving application exit code $APP_EXIT_CODE" >&2
+    APP_EXIT_CODE=$?
+    echo "ERROR: Phase 1 fetch failed (exit code $APP_EXIT_CODE)"
   fi
+
+  if [ -n "$FP" ]; then
+    echo "--- Phase 2: Running Application ---"
+
+    # Clean up stale markers from previous --force runs so --watch
+    # doesn't see a pre-existing DONE marker.
+    coach-sidecar delete-file "s3://${S3_PATH_OUT}/.coach/DONE" 2>/dev/null || true
+    coach-sidecar delete-file "s3://${S3_PATH_OUT}/.coach/log.txt" 2>/dev/null || true
+
+    # Start periodic log upload to S3 (every 10s) so --watch can tail remotely.
+    # On failure, backs off: 10s, 20s, 30s, ..., capped at 60s between attempts.
+    (
+      retry=0
+      # Upload immediately so early failures (e.g. OOM crash) are visible.
+      if [ -f "$LOG_FILE" ] && [ -n "$S3_PATH_OUT" ]; then
+        coach-sidecar upload-file "$LOG_FILE" "s3://${S3_PATH_OUT}/.coach/log.txt" 2>/dev/null || true
+      fi
+      while true; do
+        sleep 10
+        if [ -f "$LOG_FILE" ] && [ -n "$S3_PATH_OUT" ]; then
+          if coach-sidecar upload-file "$LOG_FILE" "s3://${S3_PATH_OUT}/.coach/log.txt" 2>/dev/null; then
+            retry=0
+          else
+            retry=$((retry + 1))
+            [ "$retry" -gt 6 ] && retry=6
+            sleep $((10 * retry))
+          fi
+        fi
+      done
+    ) &
+    LOG_UPLOAD_PID=$!
+
+    # Run the application, capturing real stderr for the finish webhook.
+    # The stderr content is also piped through log-tee (via >&2 into the
+    # outer run_phases 2>&1 pipeline).
+    {{.RunCommand}} 2>"$STDERR_FILE"
+    APP_EXIT_CODE=$?
+    cat "$STDERR_FILE" >&2
+
+    # Stop the periodic log uploader.
+    if [ -n "$LOG_UPLOAD_PID" ]; then
+      kill "$LOG_UPLOAD_PID" 2>/dev/null || true
+      wait "$LOG_UPLOAD_PID" 2>/dev/null || true
+    fi
+
+    echo "--- Phase 3: Uploading output to S3 ---"
+    if coach-sidecar upload "$OUTPUT_DIR" "s3://${S3_PATH_OUT}"; then
+      UPLOAD_OK="true"
+    else
+      upload_rc=$?
+      echo "WARNING: S3 upload failed (exit code $upload_rc), preserving application exit code $APP_EXIT_CODE"
+    fi
+  fi
+
+  echo "--- Phase 4: Finish hook ---"
+  coach-sidecar finish \
+    --output-dir "$OUTPUT_DIR" \
+    --fingerprint "$FP" \
+    --exit-code "$APP_EXIT_CODE" \
+    --stderr-file "$STDERR_FILE" \
+    --upload-ok "$UPLOAD_OK" \
+    || echo "WARNING: finish hook failed (exit code $?)"
+
+  return $APP_EXIT_CODE
+}
+
+run_phases 2>&1 | coach-sidecar log-tee --output-dir "$OUTPUT_DIR"
+PIPE_EXIT=$?
+
+# Pipeline has finished, log-tee has exited, log.txt is complete.
+# Now upload the final log and DONE marker.
+S3_PATH_OUT=$(cat "$S3_PATH_FILE" 2>/dev/null)
+if [ -n "$S3_PATH_OUT" ] && [ -f "$LOG_FILE" ]; then
+  coach-sidecar upload-file "$LOG_FILE" "s3://${S3_PATH_OUT}/.coach/log.txt" 2>/dev/null || true
+  echo "done" > /tmp/coach-done
+  coach-sidecar upload-file /tmp/coach-done "s3://${S3_PATH_OUT}/.coach/DONE" 2>/dev/null || true
 fi
 
-echo "--- Phase 4: Finish hook ---"
-coach-sidecar finish \
-  --output-dir "$OUTPUT_DIR" \
-  --fingerprint "$FP" \
-  --exit-code "$APP_EXIT_CODE" \
-  --stderr-file "$STDERR_FILE" \
-  --upload-ok "$UPLOAD_OK" \
-  || echo "WARNING: finish hook failed (exit code $?)" >&2
-
-exit $APP_EXIT_CODE
+exit $PIPE_EXIT

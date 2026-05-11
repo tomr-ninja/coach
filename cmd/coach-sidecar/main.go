@@ -41,9 +41,12 @@ var (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: coach-sidecar <command> [args]\n")
-		fmt.Fprintf(os.Stderr, "  fetch  --source s3:bucket/prefix --digest <hex> <data-dir>\n")
-		fmt.Fprintf(os.Stderr, "  upload <local-dir> s3:bucket/prefix\n")
-		fmt.Fprintf(os.Stderr, "  finish --output-dir <dir> [--fingerprint <hex>] --exit-code <int> [--stderr-file <path>] [--upload-ok <bool>]\n")
+		fmt.Fprintf(os.Stderr, "  fetch     --source s3:bucket/prefix --digest <hex> <data-dir>\n")
+		fmt.Fprintf(os.Stderr, "  upload    <local-dir> s3:bucket/prefix\n")
+		fmt.Fprintf(os.Stderr, "  finish    --output-dir <dir> [--fingerprint <hex>] --exit-code <int> [--stderr-file <path>] [--upload-ok <bool>]\n")
+		fmt.Fprintf(os.Stderr, "  log-tee      --output-dir <dir> [--flush-interval <seconds>]\n")
+		fmt.Fprintf(os.Stderr, "  upload-file  <local-file> s3:bucket/key\n")
+		fmt.Fprintf(os.Stderr, "  delete-file  s3:bucket/key\n")
 		os.Exit(1)
 	}
 
@@ -54,6 +57,12 @@ func main() {
 		cmdUpload(os.Args[2:])
 	case "finish":
 		cmdFinish(os.Args[2:])
+	case "log-tee":
+		cmdLogTee(os.Args[2:])
+	case "upload-file":
+		cmdUploadFile(os.Args[2:])
+	case "delete-file":
+		cmdDeleteFile(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -187,6 +196,106 @@ func cmdUpload(args []string) {
 	}
 }
 
+func cmdUploadFile(args []string) {
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: coach-sidecar upload-file <local-file> s3:bucket/key\n")
+		os.Exit(1)
+	}
+
+	localFile := args[0]
+	s3Dest := args[1]
+
+	if err := doUploadFile(localFile, s3Dest); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+const maxUploadFileSize = 50 << 20 // 50 MiB cap to avoid OOM
+
+func doUploadFile(localFile, s3Dest string) error {
+	bucket, key := parseURI(s3Dest)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s3Client, err := newS3Client(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errS3Client, err)
+	}
+
+	// Read file capped at maxUploadFileSize to prevent OOM on
+	// unexpectedly large log files.
+	// #nosec G703 -- localFile is from the sidecar's trusted localDir
+	info, err := os.Stat(localFile)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", localFile, err)
+	}
+	readSize := info.Size()
+	if readSize > maxUploadFileSize {
+		fmt.Fprintf(os.Stderr, "upload-file: %s is %d bytes, capping at %d bytes\n",
+			localFile, readSize, maxUploadFileSize)
+		readSize = maxUploadFileSize
+	}
+
+	// #nosec G703 -- localFile is from the sidecar's trusted localDir
+	f, err := os.Open(localFile)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", localFile, err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, readSize))
+	if err != nil {
+		return fmt.Errorf("read %s: %w", localFile, err)
+	}
+
+	_, putErr := s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+		Body:   bytes.NewReader(data),
+	})
+	if putErr != nil {
+		return fmt.Errorf("%w: %w", errUploadFailed, putErr)
+	}
+
+	return nil
+}
+
+func cmdDeleteFile(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "usage: coach-sidecar delete-file s3:bucket/key\n")
+		os.Exit(1)
+	}
+
+	if err := doDeleteFile(args[0]); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+func doDeleteFile(s3URI string) error {
+	bucket, key := parseURI(s3URI)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	s3Client, err := newS3Client(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errS3Client, err)
+	}
+
+	_, err = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("delete s3://%s/%s: %w", bucket, key, err)
+	}
+
+	return nil
+}
+
 func doUpload(localDir, s3Dest string) error {
 	bucket, prefix := parseURI(s3Dest)
 	prefix = strings.TrimSuffix(prefix, "/") + "/"
@@ -201,7 +310,14 @@ func doUpload(localDir, s3Dest string) error {
 
 	fmt.Fprintf(os.Stderr, "Uploading to s3://%s/%s...\n", bucket, prefix)
 
-	fileCount := 0
+	// Collect all files, skipping .coach/log.txt and .coach/DONE.
+	// They are uploaded separately after the pipeline completes.
+	type fileEntry struct {
+		path string
+		rel  string
+	}
+	var files []fileEntry
+
 	//nolint:gosec // CLI sidecar: localDir comes from container entrypoint args
 	err = filepath.WalkDir(localDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -210,36 +326,43 @@ func doUpload(localDir, s3Dest string) error {
 		if d.IsDir() {
 			return nil
 		}
-
 		rel, relErr := filepath.Rel(localDir, path)
 		if relErr != nil {
 			return relErr
 		}
-
-		key := prefix + rel
-
-		//nolint:gosec // CLI sidecar: path from WalkDir callback in trusted localDir
-		f, openErr := os.Open(path)
-		if openErr != nil {
-			return fmt.Errorf("open %s: %w", rel, openErr)
+		// Skip log and DONE marker — they're uploaded after the pipeline finishes.
+		if rel == filepath.Join(".coach", "log.txt") || rel == filepath.Join(".coach", "DONE") {
+			return nil
 		}
-		defer f.Close()
+		files = append(files, fileEntry{path: path, rel: rel})
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("%w: %w", errUploadFailed, err)
+	}
+
+	fileCount := 0
+	for _, fe := range files {
+		key := prefix + fe.rel
+
+		// #nosec G703 -- fe.path is from WalkDir in trusted localDir
+		f, openErr := os.Open(fe.path)
+		if openErr != nil {
+			return fmt.Errorf("open %s: %w", fe.rel, openErr)
+		}
 
 		_, putErr := s3Client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: &bucket,
 			Key:    &key,
 			Body:   f,
 		})
+		f.Close()
 		if putErr != nil {
-			return fmt.Errorf("upload %s: %w", rel, putErr)
+			return fmt.Errorf("upload %s: %w", fe.rel, putErr)
 		}
 
-		fmt.Fprintf(os.Stderr, "  uploaded %s\n", rel)
+		fmt.Fprintf(os.Stderr, "  uploaded %s\n", fe.rel)
 		fileCount++
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("%w: %w", errUploadFailed, err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Uploaded %d files.\n", fileCount)
