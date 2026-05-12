@@ -1,10 +1,16 @@
-package protocol
+package validate
 
 import (
 	"strconv"
 	"strings"
+
+	"github.com/tomr-ninja/coach/protocol"
 )
 
+// ParseCPU converts a user-facing CPU string to millicores.
+// Accepts bare numbers (treated as cores, e.g. "1.5" = 1500m)
+// or explicit millicore values (e.g. "500m").
+// Returns 0 for unparseable input.
 func ParseCPU(s string) uint32 {
 	if s == "" {
 		return 0
@@ -26,6 +32,10 @@ func ParseCPU(s string) uint32 {
 	return 0
 }
 
+// ParseMemory converts a user-facing memory string to Mi (mebibytes).
+// Recognises suffixes: Ki, Mi, Gi, Ti, Pi and their shorthand K, M, G, T, P.
+// Bare numbers are treated as Mi. Values below 1 are rounded up to 1.
+// Returns 0 for unparseable input.
 func ParseMemory(s string) uint32 {
 	if s == "" {
 		return 0
@@ -76,6 +86,10 @@ func ParseMemory(s string) uint32 {
 	return 0
 }
 
+// ParseGPU converts a user-facing GPU count string to a uint32.
+// Only bare integer strings are accepted (e.g. "2"). Floats and negatives
+// are rejected (return 0).
+// Returns 0 for empty or unparseable input.
 func ParseGPU(s string) uint32 {
 	if s == "" {
 		return 0
@@ -87,8 +101,10 @@ func ParseGPU(s string) uint32 {
 	return uint32(v)
 }
 
-func ParseResources(cpu, memory, gpu, gpuType string) Resources {
-	return Resources{
+// ParseResources combines the four resource flags into a protocol.Resources value.
+// Empty strings are treated as "not specified" and produce zero values.
+func ParseResources(cpu, memory, gpu, gpuType string) protocol.Resources {
+	return protocol.Resources{
 		CPUMillicores: ParseCPU(cpu),
 		MemoryMi:      ParseMemory(memory),
 		GPU:           ParseGPU(gpu),

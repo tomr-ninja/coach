@@ -22,6 +22,14 @@ import (
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
+// s3Client abstracts S3 operations used within the package.
+// *s3.Client satisfies this interface.
+type s3Client interface {
+	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
+	HeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
+	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+}
+
 var (
 	ErrNoObjects   = errors.New("no objects found at s3 location")
 	ErrNotS3URI    = errors.New("not an s3 uri")
@@ -34,6 +42,8 @@ const (
 )
 
 // Checksums resolves SHA256 checksums for all objects under an S3 URI.
+// The operation is retried on transient errors. For direct client usage
+// without retries, use ChecksumsWithClient.
 func Checksums(uri string, cfg *config.Config) ([][32]byte, error) {
 	bucket, prefix, err := ParseURI(uri)
 	if err != nil {
@@ -48,101 +58,108 @@ func Checksums(uri string, cfg *config.Config) ([][32]byte, error) {
 		if s3err != nil {
 			return nil, maybeTransient(s3err)
 		}
+		return ChecksumsWithClient(ctx, client, bucket, prefix)
+	})
 
-		var checksums [][32]byte
-		paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
-			Bucket: &bucket,
-			Prefix: &prefix,
-		})
+	return result, err
+}
 
-		tryChecksum := true
+// ChecksumsWithClient resolves SHA256 checksums for all objects under an S3
+// bucket/prefix using the provided S3 client. Prefers S3 Object Checksum SHA-256
+// metadata when available; falls back to downloading and hashing.
+func ChecksumsWithClient(ctx context.Context, client s3Client, bucket, prefix string) ([][32]byte, error) {
+	var checksums [][32]byte
+	paginator := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{
+		Bucket: &bucket,
+		Prefix: &prefix,
+	})
 
-		for paginator.HasMorePages() {
-			page, pageErr := paginator.NextPage(ctx)
-			if pageErr != nil {
-				return nil, maybeTransient(fmt.Errorf("list s3 objects: %w", pageErr))
+	tryChecksum := true
+
+	for paginator.HasMorePages() {
+		page, pageErr := paginator.NextPage(ctx)
+		if pageErr != nil {
+			return nil, maybeTransient(fmt.Errorf("list s3 objects: %w", pageErr))
+		}
+
+		// Collect objects that need content download (no built-in checksum).
+		type downloadTask struct {
+			key  string
+			size int64
+		}
+		var tasks []downloadTask
+
+		for _, obj := range page.Contents {
+			if strings.HasSuffix(*obj.Key, "/") {
+				continue
 			}
 
-			// Collect objects that need content download (no built-in checksum).
-			type downloadTask struct {
-				key  string
-				size int64
-			}
-			var tasks []downloadTask
-
-			for _, obj := range page.Contents {
-				if strings.HasSuffix(*obj.Key, "/") {
+			// Prefer S3 Object Checksum SHA-256 (real content hash, no download).
+			if tryChecksum {
+				chk, csErr := getS3ChecksumSHA256(ctx, client, bucket, *obj.Key)
+				if csErr == nil {
+					checksums = append(checksums, chk)
 					continue
 				}
+				if errors.Is(csErr, ErrNoChecksum) {
+					tryChecksum = false
+					fmt.Fprintf(os.Stderr, "checksum: S3 objects lack SHA256 metadata, downloading to compute content hashes — this may be slow\n")
+				}
+				// Transient errors fall through: object goes to download tasks,
+				// but we keep trying checksum metadata for subsequent objects.
+			}
 
-				// Prefer S3 Object Checksum SHA-256 (real content hash, no download).
-				if tryChecksum {
-					chk, csErr := getS3ChecksumSHA256(ctx, client, bucket, *obj.Key)
-					if csErr == nil {
+			sz := int64(0)
+			if obj.Size != nil {
+				sz = *obj.Size
+			}
+			tasks = append(tasks, downloadTask{key: *obj.Key, size: sz})
+		}
+
+		// Download in parallel with bounded concurrency.
+		if len(tasks) > 0 {
+			var (
+				wg    sync.WaitGroup
+				sem   = make(chan struct{}, maxParallelDownloads)
+				mu    sync.Mutex
+				first error
+			)
+			for _, t := range tasks {
+				wg.Add(1)
+				go func(t downloadTask) {
+					defer wg.Done()
+					sem <- struct{}{}
+					defer func() { <-sem }()
+
+					chk, dlErr := downloadAndHash(ctx, client, bucket, t.key, t.size)
+					mu.Lock()
+					if dlErr != nil {
+						if first == nil {
+							first = maybeTransient(fmt.Errorf("checksum %s: %w", t.key, dlErr))
+						}
+					} else {
 						checksums = append(checksums, chk)
-						continue
 					}
-					if errors.Is(csErr, ErrNoChecksum) {
-						tryChecksum = false
-						fmt.Fprintf(os.Stderr, "checksum: S3 objects lack SHA256 metadata, downloading to compute content hashes — this may be slow\n")
+					// Warn about large objects so the user knows
+					// when checksum computation may be slow.
+					if t.size > 100<<20 {
+						fmt.Fprintf(os.Stderr, "checksum: downloading large object %s (%.1f MiB) — this may take a while\n",
+							t.key, float64(t.size)/(1<<20))
 					}
-					// Transient errors fall through: object goes to download tasks,
-					// but we keep trying checksum metadata for subsequent objects.
-				}
-
-				sz := int64(0)
-				if obj.Size != nil {
-					sz = *obj.Size
-				}
-				tasks = append(tasks, downloadTask{key: *obj.Key, size: sz})
+					mu.Unlock()
+				}(t)
 			}
-
-			// Download in parallel with bounded concurrency.
-			if len(tasks) > 0 {
-				var (
-					wg    sync.WaitGroup
-					sem   = make(chan struct{}, maxParallelDownloads)
-					mu    sync.Mutex
-					first error
-				)
-				for _, t := range tasks {
-					wg.Add(1)
-					go func(t downloadTask) {
-						defer wg.Done()
-						sem <- struct{}{}
-						defer func() { <-sem }()
-
-						chk, dlErr := downloadAndHash(ctx, client, bucket, t.key, t.size)
-						mu.Lock()
-						if dlErr != nil {
-							if first == nil {
-								first = maybeTransient(fmt.Errorf("checksum %s: %w", t.key, dlErr))
-							}
-						} else {
-							checksums = append(checksums, chk)
-						}
-						// Warn about large objects so the user knows
-						// when checksum computation may be slow.
-						if t.size > 100<<20 {
-							fmt.Fprintf(os.Stderr, "checksum: downloading large object %s (%.1f MiB) — this may take a while\n",
-								t.key, float64(t.size)/(1<<20))
-						}
-						mu.Unlock()
-					}(t)
-				}
-				wg.Wait()
-				if first != nil {
-					return nil, first
-				}
+			wg.Wait()
+			if first != nil {
+				return nil, first
 			}
 		}
+	}
 
-		if len(checksums) == 0 {
-			return nil, fmt.Errorf("%w: s3://%s/%s", ErrNoObjects, bucket, prefix)
-		}
-		return checksums, nil
-	})
-	return result, err
+	if len(checksums) == 0 {
+		return nil, fmt.Errorf("%w: s3://%s/%s", ErrNoObjects, bucket, prefix)
+	}
+	return checksums, nil
 }
 
 // ArtifactExists checks whether any objects exist under the given S3 path.
@@ -152,12 +169,17 @@ func ArtifactExists(ctx context.Context, cfg *config.Config, s3PathOut string) (
 		return false, err
 	}
 
-	s3Client, err := NewS3Client(ctx, cfg)
+	client, err := NewS3Client(ctx, cfg)
 	if err != nil {
 		return false, fmt.Errorf("create s3 client: %w", err)
 	}
 
-	resp, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+	return artifactExistsWithClient(ctx, client, bucket, prefix)
+}
+
+// artifactExistsWithClient checks whether any objects exist using the provided S3 client.
+func artifactExistsWithClient(ctx context.Context, client s3Client, bucket, prefix string) (bool, error) {
+	resp, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket:  &bucket,
 		Prefix:  &prefix,
 		MaxKeys: aws.Int32(1),
@@ -200,7 +222,7 @@ var ErrNoChecksum = errors.New("no SHA256 checksum in object metadata")
 // getS3ChecksumSHA256 retrieves the SHA-256 checksum from S3 object metadata.
 // Returns ErrNoChecksum when the metadata is genuinely absent; other errors
 // are transient and the caller should not disable checksum lookups.
-func getS3ChecksumSHA256(ctx context.Context, client *s3.Client, bucket, key string) ([32]byte, error) {
+func getS3ChecksumSHA256(ctx context.Context, client s3Client, bucket, key string) ([32]byte, error) {
 	resp, err := client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
@@ -223,9 +245,8 @@ func getS3ChecksumSHA256(ctx context.Context, client *s3.Client, bucket, key str
 	return out, nil
 }
 
-// downloadAndHash downloads an S3 object and computes its SHA256 content hash,
-// matching the sidecar's artifact.CollectChecksums.
-func downloadAndHash(ctx context.Context, client *s3.Client, bucket, key string, listingSize int64) ([32]byte, error) {
+// downloadAndHash downloads an S3 object and computes its SHA256 content hash.
+func downloadAndHash(ctx context.Context, client s3Client, bucket, key string, listingSize int64) ([32]byte, error) {
 	// Reject objects known to be too large from the listing, avoiding
 	// an unnecessary GetObject round-trip.
 	if listingSize > maxChecksumDownloadSize {

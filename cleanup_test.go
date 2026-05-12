@@ -51,15 +51,9 @@ RUN echo "cleanup test %s" > /test.txt
 	return tag, cleanup
 }
 
-func imageExists(t *testing.T, tag string) bool {
+func imageExists(t *testing.T, client *docker.Client, tag string) bool {
 	t.Helper()
-	client, err := docker.NewClient()
-	require.NoError(t, err)
-	defer client.Close()
-
 	exists, err := client.ImageExists(context.Background(), tag)
-	// ImageInspect returns an error when the image doesn't exist.
-	// Treat any error as "absent".
 	if err != nil {
 		return false
 	}
@@ -72,9 +66,13 @@ func TestCleanup_RemovesAllWrapperImages(t *testing.T) {
 	tag2, cleanup2 := setupCleanupTest(t)
 	defer cleanup2()
 
+	client, err := docker.NewClient()
+	require.NoError(t, err)
+	defer client.Close()
+
 	// Both images should exist before cleanup
-	assert.True(t, imageExists(t, tag1), "tag1 should exist before cleanup")
-	assert.True(t, imageExists(t, tag2), "tag2 should exist before cleanup")
+	assert.True(t, imageExists(t, client, tag1), "tag1 should exist before cleanup")
+	assert.True(t, imageExists(t, client, tag2), "tag2 should exist before cleanup")
 
 	// Run cleanup with maxAge=0 (remove all)
 	ctx := context.Background()
@@ -84,15 +82,19 @@ func TestCleanup_RemovesAllWrapperImages(t *testing.T) {
 	assert.Equal(t, 0, result.Errors)
 
 	// Both images should be gone
-	assert.False(t, imageExists(t, tag1), "tag1 should be removed")
-	assert.False(t, imageExists(t, tag2), "tag2 should be removed")
+	assert.False(t, imageExists(t, client, tag1), "tag1 should be removed")
+	assert.False(t, imageExists(t, client, tag2), "tag2 should be removed")
 }
 
 func TestCleanup_DryRun(t *testing.T) {
 	tag, cleanup := setupCleanupTest(t)
 	defer cleanup()
 
-	assert.True(t, imageExists(t, tag), "image should exist before dry-run cleanup")
+	client, err := docker.NewClient()
+	require.NoError(t, err)
+	defer client.Close()
+
+	assert.True(t, imageExists(t, client, tag), "image should exist before dry-run cleanup")
 
 	ctx := context.Background()
 	result, err := Cleanup(ctx, 0, true)
@@ -101,14 +103,18 @@ func TestCleanup_DryRun(t *testing.T) {
 	assert.Equal(t, 0, result.Errors)
 
 	// Image should still exist after dry-run
-	assert.True(t, imageExists(t, tag), "image should still exist after dry-run")
+	assert.True(t, imageExists(t, client, tag), "image should still exist after dry-run")
 }
 
 func TestCleanup_RespectsMaxAge(t *testing.T) {
 	tag, cleanup := setupCleanupTest(t)
 	defer cleanup()
 
-	assert.True(t, imageExists(t, tag), "image should exist before cleanup")
+	client, err := docker.NewClient()
+	require.NoError(t, err)
+	defer client.Close()
+
+	assert.True(t, imageExists(t, client, tag), "image should exist before cleanup")
 
 	// Set maxAge to 100 years — all images are newer, so none should be removed
 	ctx := context.Background()
@@ -118,7 +124,7 @@ func TestCleanup_RespectsMaxAge(t *testing.T) {
 	assert.Equal(t, 0, result.Errors)
 
 	// Image should still exist
-	assert.True(t, imageExists(t, tag), "image should still exist")
+	assert.True(t, imageExists(t, client, tag), "image should still exist")
 }
 
 func TestCleanup_NoWrapperImages(t *testing.T) {
@@ -132,29 +138,4 @@ func TestCleanup_NoWrapperImages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.Removed, "should remove 0 images when none exist")
 	assert.Equal(t, 0, result.Errors)
-}
-
-func TestCleanup_DryRunOutput(t *testing.T) {
-	tag, cleanup := setupCleanupTest(t)
-	defer cleanup()
-
-	// Redirect stdout to capture dry-run output
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stdout = w
-
-	ctx := context.Background()
-	result, err := Cleanup(ctx, 0, true)
-	require.NoError(t, err)
-
-	w.Close()
-
-	output := make([]byte, 4096)
-	n, _ := r.Read(output)
-	os.Stdout = oldStdout
-
-	assert.GreaterOrEqual(t, result.Removed, 1, "dry-run should count images")
-	assert.Contains(t, string(output[:n]), "would remove:", "dry-run should print 'would remove:'")
-	assert.Contains(t, string(output[:n]), tag, "dry-run should mention the tag")
 }

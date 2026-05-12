@@ -17,10 +17,7 @@ import (
 	"github.com/tomr-ninja/coach/internal/config"
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 	"github.com/tomr-ninja/coach/internal/validate"
-	"github.com/tomr-ninja/coach/protocol"
 )
-
-const cmdRun = "run"
 
 func signalContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -60,11 +57,16 @@ func main() {
 
 	cmd.Next() // go into root
 
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		handleError(fmt.Errorf("load config: %w", err))
+	}
+
 	var verbose bool
 
 	rootFlags := flag.NewFlagSet("coach", flag.ExitOnError)
 	rootFlags.BoolVar(&verbose, "verbose", false, "Enable verbose output")
-	if err := rootFlags.Parse(cmd.Args()); err != nil {
+	if err = rootFlags.Parse(cmd.Args()); err != nil {
 		handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 	}
 
@@ -74,7 +76,7 @@ func main() {
 	}
 
 	switch cmd.Command() {
-	case cmdRun:
+	case "run":
 		var data, output string
 		var force bool
 
@@ -82,7 +84,7 @@ func main() {
 		runFlags.StringVar(&data, "data", "./data", "Path to the data folder")
 		runFlags.StringVar(&output, "output", "./output", "Path to the output folder")
 		runFlags.BoolVar(&force, "force", false, "Force re-creation of existing artifact")
-		if err := runFlags.Parse(cmd.Args()); err != nil {
+		if err = runFlags.Parse(cmd.Args()); err != nil {
 			handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 		}
 
@@ -93,13 +95,15 @@ func main() {
 		}
 		modelImage := posArgs[0]
 
-		if err := validate.ModelImage(modelImage); err != nil {
+		if err = validate.ModelImage(modelImage); err != nil {
 			handleError(err)
 		}
-		if err := validate.DirPath(data); err != nil {
+		err = validate.DirPath(data)
+		if err != nil {
 			handleError(fmt.Errorf("validate data path: %w", err))
 		}
-		if err := validate.DirPath(output); err != nil {
+		err = validate.DirPath(output)
+		if err != nil {
 			handleError(fmt.Errorf("validate output dir: %w", err))
 		}
 
@@ -109,7 +113,7 @@ func main() {
 			ctx = coach.WithVerbose(ctx)
 		}
 
-		fingerprint, err := coach.Run(ctx, modelImage, data, output, force)
+		fingerprint, err := coach.Run(ctx, cfg, modelImage, data, output, force)
 		if err != nil {
 			handleError(err)
 		}
@@ -146,7 +150,7 @@ func main() {
 				fmt.Println(s)
 			}
 
-		case cmdRun:
+		case "run":
 			var data, output string
 
 			scriptRunFlags := flag.NewFlagSet("script run", flag.ExitOnError)
@@ -213,7 +217,7 @@ func main() {
 		}
 
 		switch cmd.Command() {
-		case cmdRun:
+		case "run":
 			var (
 				dataSource, outputURI, script string
 				force, watch                  bool
@@ -233,7 +237,7 @@ func main() {
 			runFlags.StringVar(&gpu, "gpu", "", "GPU count")
 			runFlags.StringVar(&gpuType, "gpu-type", "", "GPU type")
 			runFlags.Var(&labels, "label", "Label key=value (repeatable)")
-			if err := runFlags.Parse(cmd.Args()); err != nil {
+			if err = runFlags.Parse(cmd.Args()); err != nil {
 				handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 			}
 
@@ -264,15 +268,11 @@ func main() {
 			}
 
 			labelMap := parseLabels(labels)
-			resources := protocol.ParseResources(cpu, memory, gpu, gpuType)
+			resources := validate.ParseResources(cpu, memory, gpu, gpuType)
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
-			}
-			cfg, err := config.LoadConfig()
-			if err != nil {
-				handleError(fmt.Errorf("load config: %w", err))
 			}
 			id, logS3URI, err := coach.RemoteRun(ctx, cfg, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
 			if err != nil {
@@ -339,13 +339,13 @@ func main() {
 			}
 
 			labelMap := parseLabels(labels)
-			resources := protocol.ParseResources(cpu, memory, gpu, gpuType)
+			resources := validate.ParseResources(cpu, memory, gpu, gpuType)
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			id, err := coach.RemoteSchedule(ctx, backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
+			id, err := coach.RemoteSchedule(ctx, cfg, backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
 			if err != nil {
 				handleError(err)
 			}
@@ -357,7 +357,7 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			entries, err := coach.RemoteList(ctx, backend)
+			entries, err := coach.RemoteList(ctx, cfg, backend)
 			if err != nil {
 				handleError(err)
 			}
@@ -381,7 +381,7 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			if err := coach.RemoteDelete(ctx, backend, id); err != nil {
+			if err := coach.RemoteDelete(ctx, cfg, backend, id); err != nil {
 				handleError(err)
 			}
 
@@ -396,7 +396,7 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			status, err := coach.RemoteStatus(ctx, backend, id)
+			status, err := coach.RemoteStatus(ctx, cfg, backend, id)
 			if err != nil {
 				handleError(err)
 			}

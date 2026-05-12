@@ -15,7 +15,7 @@ import (
 	"github.com/tomr-ninja/coach/internal/wrap"
 )
 
-func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
+func Run(ctx context.Context, cfg *config.Config, modelImage, dataDir, outputDir string, force bool) ([32]byte, error) {
 	if err := validate.ModelImage(modelImage); err != nil {
 		return artifact.Zero, fmt.Errorf("validate model image: %w", err)
 	}
@@ -33,10 +33,6 @@ func Run(ctx context.Context, modelImage, dataDir, outputDir string, force bool)
 	}
 
 	if dataIsS3 && outputIsS3 {
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			return artifact.Zero, fmt.Errorf("load config: %w", err)
-		}
 		return RunS3(ctx, cfg, modelImage, dataDir, outputDir, force)
 	}
 

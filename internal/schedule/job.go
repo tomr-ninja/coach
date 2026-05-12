@@ -3,7 +3,7 @@ package schedule
 import (
 	"fmt"
 
-	"github.com/tomr-ninja/coach/internal/wrap"
+	"github.com/tomr-ninja/coach/internal/utils"
 	"github.com/tomr-ninja/coach/protocol"
 )
 
@@ -22,7 +22,7 @@ type BuildJobParams struct {
 
 // BuildJob assembles a protocol.Job from its parts.
 func BuildJob(p BuildJobParams) *protocol.Job {
-	name := fmt.Sprintf("coach-container-runner-%s", wrap.SanitizeImageName(p.ModelImage))
+	name := fmt.Sprintf("coach-container-runner-%s", utils.SanitizeImageName(p.ModelImage))
 	job := &protocol.Job{
 		ImageDigest: p.ImageDigest,
 		Name:        name,

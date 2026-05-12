@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"text/template"
 
@@ -40,7 +39,7 @@ var (
 // When empty, the platform is auto-detected from the locally available base image.
 // The coach-sidecar binary is cross-compiled inside a multi-stage Docker build.
 func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registryAuth, targetPlatform string, entrypoint []string) (string, error) {
-	safeName := SanitizeImageName(baseImage)
+	safeName := utils.SanitizeImageName(baseImage)
 	shortFP := randomSuffix()
 	tag := fmt.Sprintf("coach-wrapped-%s:%s", safeName, shortFP)
 	if registry != "" {
@@ -79,7 +78,7 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registry
 	if len(entrypoint) > 0 {
 		quoted := make([]string, len(entrypoint))
 		for i, e := range entrypoint {
-			quoted[i] = ShellQuote(e)
+			quoted[i] = utils.ShellQuote(e)
 		}
 		runCommand = fmt.Sprintf("%s \"$@\"", strings.Join(quoted, " "))
 	} else {
@@ -161,45 +160,6 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registry
 	}
 
 	return tag, nil
-}
-
-var safeImageRegexp = regexp.MustCompile(`[^a-zA-Z0-9_.-]`)
-
-// SanitizeImageName converts a Docker image reference into a safe tag fragment.
-func SanitizeImageName(name string) string {
-	parts := strings.Split(name, "/")
-	last := parts[len(parts)-1]
-	last = strings.ReplaceAll(last, ":", "-")
-	return safeImageRegexp.ReplaceAllString(last, "-")
-}
-
-// ShellQuote escapes a string for safe use in a POSIX shell.
-func ShellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	for _, r := range s {
-		if !shellSafe(r) {
-			return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-		}
-	}
-	return s
-}
-
-func shellSafe(r rune) bool {
-	switch {
-	case r >= 'a' && r <= 'z':
-		return true
-	case r >= 'A' && r <= 'Z':
-		return true
-	case r >= '0' && r <= '9':
-		return true
-	}
-	switch r {
-	case '-', '_', '.', '/', ',':
-		return true
-	}
-	return false
 }
 
 // randomSuffix generates a random 12-hex-char suffix for image tag uniqueness.

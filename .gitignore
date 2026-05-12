@@ -1,9 +1,12 @@
 coach
+coach-sidecar
 coach.json
+
+drivers/coach-scaleway/coach-scaleway
+drivers/coach-nebius/coach-nebius
+
 __pycache__/
 .venv/
 *.pyc
-drivers/coach-scaleway/coach-scaleway
-drivers/coach-nebius/coach-nebius
 .pi
 .idea

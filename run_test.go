@@ -1,102 +1,15 @@
 package coach
 
 import (
-	"crypto/sha256"
-	"os"
-	"path/filepath"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tomr-ninja/coach/internal/artifact"
 	"github.com/tomr-ninja/coach/internal/config"
+	"github.com/tomr-ninja/coach/internal/validate"
 )
-
-func TestArtifactFingerprint(t *testing.T) {
-	digest := sha256.Sum256([]byte("model"))
-	chk1 := sha256.Sum256([]byte("a"))
-	chk2 := sha256.Sum256([]byte("b"))
-
-	// Order should not matter
-	fp1 := artifact.Fingerprint(digest, [][32]byte{chk1, chk2})
-	fp2 := artifact.Fingerprint(digest, [][32]byte{chk2, chk1})
-	assert.Equal(t, fp1, fp2, "fingerprint should be order-independent")
-
-	// Different inputs -> different output
-	fp3 := artifact.Fingerprint(digest, [][32]byte{chk1})
-	assert.NotEqual(t, fp1, fp3, "different checksums should yield different fingerprint")
-}
-
-func TestPrepareArtifactDir(t *testing.T) {
-	t.Run("creates dir", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "artifacts")
-		err := artifact.PrepareDir(path, false)
-		require.NoError(t, err)
-		info, err := os.Stat(path)
-		require.NoError(t, err)
-		assert.True(t, info.IsDir())
-	})
-
-	t.Run("errors when exists and not forced", func(t *testing.T) {
-		path := t.TempDir()
-		err := artifact.PrepareDir(path, false)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, artifact.ErrExists)
-	})
-
-	t.Run("removes and recreates when forced", func(t *testing.T) {
-		path := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(path, "old.txt"), []byte("x"), 0o644))
-		err := artifact.PrepareDir(path, true)
-		require.NoError(t, err)
-		entries, err := os.ReadDir(path)
-		require.NoError(t, err)
-		assert.Empty(t, entries)
-	})
-}
-
-func TestValidateArtifactDir(t *testing.T) {
-	t.Run("valid", func(t *testing.T) {
-		path := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(path, "out.txt"), []byte("x"), 0o644))
-		err := artifact.ValidateDir(path)
-		require.NoError(t, err)
-	})
-
-	t.Run("missing", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "missing")
-		err := artifact.ValidateDir(path)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, artifact.ErrMissing)
-	})
-
-	t.Run("empty", func(t *testing.T) {
-		path := t.TempDir()
-		err := artifact.ValidateDir(path)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, artifact.ErrEmpty)
-	})
-}
-
-func TestFileSHA256(t *testing.T) {
-	t.Run("matches content", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "file.txt")
-		require.NoError(t, os.WriteFile(path, []byte("hello"), 0o644))
-
-		got, err := artifact.CollectChecksums(filepath.Dir(path))
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		want := sha256.Sum256([]byte("hello"))
-		assert.Equal(t, want, got[0])
-	})
-
-	t.Run("missing file", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "missing")
-		_, err := artifact.CollectChecksums(path)
-		require.Error(t, err)
-	})
-}
 
 func TestBuildS3ContainerEnv(t *testing.T) {
 	cfg := &config.Config{
@@ -106,6 +19,7 @@ func TestBuildS3ContainerEnv(t *testing.T) {
 			Region:          "us-west-2",
 			Endpoint:        "http://minio:9000",
 		},
+		WebhookURL: "https://hooks.example.com/notify",
 	}
 
 	got := s3WrapperEnvVars(cfg, "bucket/data", "bucket/output/", "abc123")
@@ -113,8 +27,224 @@ func TestBuildS3ContainerEnv(t *testing.T) {
 	assert.Equal(t, "bucket/data", got["S3_PATH_IN"])
 	assert.Equal(t, "bucket/output/", got["S3_PATH_OUT_PREFIX"])
 	assert.Equal(t, "abc123", got["COACH_IMAGE_DIGEST"])
+	assert.Equal(t, "https://hooks.example.com/notify", got["COACH_WEBHOOK_URL"])
 	assert.Equal(t, "key", got["AWS_ACCESS_KEY_ID"])
 	assert.Equal(t, "secret", got["AWS_SECRET_ACCESS_KEY"])
 	assert.Equal(t, "us-west-2", got["AWS_REGION"])
 	assert.Equal(t, "http://minio:9000", got["AWS_ENDPOINT_URL"])
+}
+
+func TestBuildS3ContainerEnv_NoEndpoint(t *testing.T) {
+	cfg := &config.Config{
+		S3: config.S3Config{
+			AccessKeyID:     config.NewSecureString("ak"),
+			SecretAccessKey: config.NewSecureString("sk"),
+			Region:          "eu-west-1",
+		},
+	}
+
+	got := s3WrapperEnvVars(cfg, "in/data", "out/", "ff")
+
+	assert.Equal(t, "in/data", got["S3_PATH_IN"])
+	assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
+	assert.Equal(t, "ff", got["COACH_IMAGE_DIGEST"])
+	assert.Equal(t, "", got["COACH_WEBHOOK_URL"])
+	assert.Equal(t, "ak", got["AWS_ACCESS_KEY_ID"])
+	assert.Equal(t, "sk", got["AWS_SECRET_ACCESS_KEY"])
+	assert.Equal(t, "eu-west-1", got["AWS_REGION"])
+	// AWS_ENDPOINT_URL should be absent when endpoint is empty.
+	_, hasEndpoint := got["AWS_ENDPOINT_URL"]
+	assert.False(t, hasEndpoint, "AWS_ENDPOINT_URL should not be set when endpoint is empty")
+}
+
+func TestBuildS3ContainerEnv_EmptyImageDigest(t *testing.T) {
+	cfg := &config.Config{
+		S3: config.S3Config{
+			AccessKeyID:     config.NewSecureString("key"),
+			SecretAccessKey: config.NewSecureString("secret"),
+			Region:          "us-east-1",
+		},
+	}
+
+	got := s3WrapperEnvVars(cfg, "data", "out/", "")
+
+	assert.Equal(t, "", got["COACH_IMAGE_DIGEST"])
+	assert.Equal(t, "data", got["S3_PATH_IN"])
+	assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
+}
+
+func TestRun_ValidationErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	runValidationTests(t, []validationTest{
+		{
+			name: "invalid model image",
+			fn: func(ctx context.Context) error {
+				_, err := Run(ctx, &config.Config{}, "", "/data", "/output", false)
+				return err
+			},
+			wantErr: validate.ErrModelImageEmpty,
+		},
+		{
+			name: "missing data dir",
+			fn: func(ctx context.Context) error {
+				_, err := Run(ctx, &config.Config{}, "ubuntu:22.04", "/nonexistent", "/output", false)
+				return err
+			},
+			wantErr: validate.ErrDirMissing,
+		},
+		{
+			name: "missing output dir",
+			fn: func(ctx context.Context) error {
+				_, err := Run(ctx, &config.Config{}, "ubuntu:22.04", tmpDir, "/nonexistent", false)
+				return err
+			},
+			wantErr: validate.ErrDirMissing,
+		},
+		{
+			name: "mixed local and s3",
+			fn: func(ctx context.Context) error {
+				_, err := Run(ctx, &config.Config{}, "ubuntu:22.04", tmpDir, "s3://bucket/output", false)
+				return err
+			},
+			wantErr: validate.ErrMixedLocalS3,
+		},
+	})
+}
+
+func TestRunLocal_ValidationErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	runValidationTests(t, []validationTest{
+		{
+			name:    "invalid model image",
+			fn:      func(ctx context.Context) error { _, err := RunLocal(ctx, "", "/data", "/output", false); return err },
+			wantErr: validate.ErrModelImageEmpty,
+		},
+		{
+			name: "empty data dir",
+			fn: func(ctx context.Context) error {
+				_, err := RunLocal(ctx, "ubuntu:22.04", "", "/output", false)
+				return err
+			},
+			wantErr: validate.ErrDirEmpty,
+		},
+		{
+			name: "empty output dir",
+			fn: func(ctx context.Context) error {
+				_, err := RunLocal(ctx, "ubuntu:22.04", tmpDir, "", false)
+				return err
+			},
+			wantErr: validate.ErrDirEmpty,
+		},
+	})
+}
+
+func TestRunS3_ValidationErrors(t *testing.T) {
+	runValidationTests(t, []validationTest{
+		{
+			name: "invalid model image",
+			fn: func(ctx context.Context) error {
+				_, err := RunS3(ctx, &config.Config{}, "ubuntu", "s3://bucket/in", "s3://bucket/out", false)
+				return err
+			},
+			wantErr: validate.ErrModelImageNoTag,
+		},
+		{
+			name: "invalid s3 format",
+			fn: func(ctx context.Context) error {
+				_, err := RunS3(ctx, &config.Config{}, "ubuntu:22.04", "s3://", "s3://bucket/out", false)
+				return err
+			},
+			wantErr: validate.ErrDirS3Format,
+		},
+		{
+			name: "invalid output s3 format",
+			fn: func(ctx context.Context) error {
+				_, err := RunS3(ctx, &config.Config{}, "ubuntu:22.04", "s3://bucket/in", "s3://", false)
+				return err
+			},
+			wantErr: validate.ErrDirS3Format,
+		},
+	})
+}
+
+func TestListScripts_ValidationErrors(t *testing.T) {
+	runValidationTests(t, []validationTest{
+		{
+			name:    "invalid model image",
+			fn:      func(ctx context.Context) error { _, err := ListScripts(ctx, ""); return err },
+			wantErr: validate.ErrModelImageEmpty,
+		},
+		{
+			name:    "missing tag",
+			fn:      func(ctx context.Context) error { _, err := ListScripts(ctx, "ubuntu"); return err },
+			wantErr: validate.ErrModelImageNoTag,
+		},
+	})
+}
+
+func TestRunScript_ValidationErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	runValidationTests(t, []validationTest{
+		{
+			name:    "invalid model image",
+			fn:      func(ctx context.Context) error { return RunScript(ctx, "", "train.py", nil, "/data", "/output") },
+			wantErr: validate.ErrModelImageEmpty,
+		},
+		{
+			name:    "empty script name",
+			fn:      func(ctx context.Context) error { return RunScript(ctx, "ubuntu:22.04", "", nil, "/data", "/output") },
+			wantErr: validate.ErrScriptNameEmpty,
+		},
+		{
+			name: "script name with path traversal",
+			fn: func(ctx context.Context) error {
+				return RunScript(ctx, "ubuntu:22.04", "../etc/passwd", nil, tmpDir, tmpDir)
+			},
+			wantErr: validate.ErrScriptNamePathSep,
+		},
+		{
+			name: "missing data dir",
+			fn: func(ctx context.Context) error {
+				return RunScript(ctx, "ubuntu:22.04", "train.py", nil, "/nonexistent", "/output")
+			},
+			wantErr: validate.ErrDirMissing,
+		},
+		{
+			name: "missing output dir",
+			fn: func(ctx context.Context) error {
+				return RunScript(ctx, "ubuntu:22.04", "train.py", nil, tmpDir, "/nonexistent")
+			},
+			wantErr: validate.ErrDirMissing,
+		},
+	})
+}
+
+// validationTest is a table-driven subtest that validates a function returns the expected error.
+type validationTest struct {
+	name        string
+	fn          func(context.Context) error
+	wantErr     error  // checked with assert.ErrorIs
+	wantContain string // checked with assert.Contains (optional)
+}
+
+// runValidationTests executes a slice of validationTest as t.Run subtests.
+func runValidationTests(t *testing.T, tests []validationTest) {
+	t.Helper()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn(t.Context())
+			require.Error(t, err)
+
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			}
+			if tt.wantContain != "" {
+				assert.Contains(t, err.Error(), tt.wantContain)
+			}
+		})
+	}
 }

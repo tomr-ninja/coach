@@ -153,6 +153,7 @@ func RemoteRun(
 // — no new data means nothing to produce.
 func RemoteSchedule(
 	ctx context.Context,
+	cfg *config.Config,
 	backendName, modelImage, dataSource, outputURI, scheduleCron string,
 	command []string,
 	script string,
@@ -177,9 +178,9 @@ func RemoteSchedule(
 		}
 	}
 
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return "", fmt.Errorf("load config: %w", err)
+	vErr := validate.LocalVsS3(dataSource, outputURI)
+	if vErr != nil {
+		return "", vErr
 	}
 
 	backend, err := cfg.Backend(backendName)
@@ -189,11 +190,6 @@ func RemoteSchedule(
 
 	if err = driver.Validate(backend.Driver); err != nil {
 		return "", fmt.Errorf("validate driver: %w", err)
-	}
-
-	vErr := validate.LocalVsS3(dataSource, outputURI)
-	if vErr != nil {
-		return "", vErr
 	}
 
 	client, err := docker.NewClient()
@@ -261,12 +257,7 @@ func RemoteSchedule(
 }
 
 // RemoteList returns all jobs/schedules submitted to the backend.
-func RemoteList(ctx context.Context, backendName string) ([]protocol.ScheduleEntry, error) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-
+func RemoteList(ctx context.Context, cfg *config.Config, backendName string) ([]protocol.ScheduleEntry, error) {
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
 		return nil, err
@@ -289,12 +280,7 @@ func RemoteList(ctx context.Context, backendName string) ([]protocol.ScheduleEnt
 }
 
 // RemoteDelete removes a job/schedule from the backend.
-func RemoteDelete(ctx context.Context, backendName, id string) error {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
+func RemoteDelete(ctx context.Context, cfg *config.Config, backendName, id string) error {
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
 		return err
@@ -313,12 +299,7 @@ func RemoteDelete(ctx context.Context, backendName, id string) error {
 }
 
 // RemoteStatus returns the current state of a job/schedule.
-func RemoteStatus(ctx context.Context, backendName, id string) (*protocol.StatusResult, error) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-
+func RemoteStatus(ctx context.Context, cfg *config.Config, backendName, id string) (*protocol.StatusResult, error) {
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
 		return nil, err

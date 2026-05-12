@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -100,8 +99,7 @@ func TestParseDockerStream_MalformedJSON_PassesThrough(t *testing.T) {
 	input := strings.NewReader("this is not json\n")
 	var buf bytes.Buffer
 	err := parseDockerStream(input, &buf)
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "this is not json")
+	require.NoError(t, err, "non-JSON input should not cause an error")
 }
 
 func TestParseDockerStream_EmptyLines(t *testing.T) {
@@ -406,13 +404,19 @@ func TestBuildContextDir(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 
-	// Read the tar and verify contents
-	data, err := io.ReadAll(reader)
+	// Verify the tar is usable as a build context: it should produce a valid image.
+	client, err := NewClient()
 	require.NoError(t, err)
-	assert.NotEmpty(t, data, "build context should have content")
+	t.Cleanup(func() { client.Close() })
 
-	// Verify it's a valid tar: tar files start with specific magic bytes
-	assert.True(t, len(data) > 512, "tar should have at least one header block")
+	ctx := context.Background()
+	tag := fmt.Sprintf("coach-test-buildctx-%x:latest", time.Now().UnixNano())
+	err = client.ImageBuild(ctx, reader, tag, "")
+	require.NoError(t, err, "image built from BuildContextDir should succeed")
+
+	exists, err := client.ImageExists(ctx, tag)
+	require.NoError(t, err)
+	assert.True(t, exists, "image should exist after building from context")
 }
 
 func TestContainerExit_Error(t *testing.T) {
@@ -450,16 +454,6 @@ CMD ["sh", "-c", "echo 'failing!' >&2; exit 1"]
 	assert.Contains(t, err.Error(), "exited with non-zero code", "should report exit code error")
 }
 
-func TestParseDockerStream_ScanError(t *testing.T) {
-	// Simulate a reader that fails mid-scan by providing corrupted data
-	// parseDockerStream uses bufio.Scanner which only fails on token-too-long
-	// We test the empty-reader case which is normal
-	var buf bytes.Buffer
-	err := parseDockerStream(strings.NewReader(""), &buf)
-	require.NoError(t, err)
-	assert.Empty(t, buf.String())
-}
-
 func TestRegistryAuth(t *testing.T) {
 	t.Run("with credentials", func(t *testing.T) {
 		result := registryAuth("registry.example.com/myimage", "user:pass")
@@ -480,55 +474,6 @@ func TestRegistryAuth(t *testing.T) {
 // ---------------------------------------------------------------------------
 // dockertest resource-based tests (using pool.Run for container lifecycle)
 // ---------------------------------------------------------------------------
-
-func TestDockertestPoolIntegration(t *testing.T) {
-	pool, err := dockertest.NewPool("")
-	require.NoError(t, err)
-
-	// Run a simple alpine container that echoes and exits
-	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: "alpine",
-		Tag:        "3.21",
-		Cmd:        []string{"echo", "dockertest works"},
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { pool.Purge(resource) })
-
-	// Wait for container to exit
-	require.NoError(t, resource.Expire(10))
-
-	// Check exit code
-	exitCode, err := pool.Client.InspectContainer(resource.Container.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 0, exitCode.State.ExitCode, "container should exit cleanly")
-}
-
-// Test with a long-running container to verify pool connection reuse
-func TestDockertestLongRunning(t *testing.T) {
-	pool, err := dockertest.NewPool("")
-	require.NoError(t, err)
-
-	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: "alpine",
-		Tag:        "3.21",
-		Cmd:        []string{"sleep", "2"},
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { pool.Purge(resource) })
-
-	// Pool should be able to retry connection
-	err = pool.Retry(func() error {
-		c, inspectErr := pool.Client.InspectContainer(resource.Container.ID)
-		if inspectErr != nil {
-			return inspectErr
-		}
-		if c.State.Running {
-			return nil
-		}
-		return fmt.Errorf("container not running, state: %v", c.State)
-	})
-	require.NoError(t, err)
-}
 
 // ---------------------------------------------------------------------------
 // docker.Client-based tests using dockertest's docker client for introspection

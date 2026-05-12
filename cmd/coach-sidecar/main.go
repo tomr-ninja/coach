@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/tomr-ninja/coach/internal/artifact"
+	"github.com/tomr-ninja/coach/internal/storage"
 )
 
 var (
@@ -172,7 +173,7 @@ func doFetch(source, digestHex, dataDir string) ([32]byte, error) {
 
 	fmt.Fprintf(os.Stderr, "Downloaded %d files. Computing fingerprint...\n", fileCount)
 
-	checksums, err := artifact.CollectChecksums(dataDir)
+	checksums, err := storage.ChecksumsWithClient(ctx, s3Client, bucket, prefix)
 	if err != nil {
 		return [32]byte{}, fmt.Errorf("%w: %w", errCollectChecksums, err)
 	}

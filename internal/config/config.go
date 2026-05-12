@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
@@ -51,7 +52,30 @@ type Backend struct {
 	Platform string          `json:"platform,omitempty"` // target platform for wrapper images, e.g., "linux/amd64"
 }
 
+var (
+	loadOnce  sync.Once
+	cachedCfg *Config
+	errCache  error
+)
+
+// ResetForTesting clears the singleton cache so subsequent LoadConfig() calls
+// re-read the file. Only exported for test use.
+func ResetForTesting() {
+	loadOnce = sync.Once{}
+	cachedCfg = nil
+	errCache = nil
+}
+
+// LoadConfig loads coach.json from the current directory or ~/.config/coach/.
+// The result is cached: subsequent calls return the same config without re-reading the file.
 func LoadConfig() (*Config, error) {
+	loadOnce.Do(func() {
+		cachedCfg, errCache = loadConfig()
+	})
+	return cachedCfg, errCache
+}
+
+func loadConfig() (*Config, error) {
 	paths := []string{"coach.json"}
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths, filepath.Join(home, ".config", "coach", "coach.json"))

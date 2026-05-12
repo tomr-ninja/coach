@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -157,16 +156,18 @@ func TestDriverTimeoutDuration(t *testing.T) {
 	})
 }
 
-func TestExpandEnvInValue_Map(t *testing.T) {
-	t.Run("nil map", func(t *testing.T) {
-		var m map[string]Backend
-		val := reflect.ValueOf(m)
-		err := expandEnvInValue(val)
-		require.NoError(t, err)
-	})
+// TestExpandEnv_NilBackendsMap verifies that expanding env vars on a Config
+// with a nil Backends map doesn't panic (exercised through the public
+// expandEnvInStruct path, which is what LoadConfig uses).
+func TestExpandEnv_NilBackendsMap(t *testing.T) {
+	cfg := Config{Backends: nil, Registry: "test"}
+	err := expandEnvInStruct(&cfg)
+	require.NoError(t, err)
+	assert.Equal(t, "test", cfg.Registry)
 }
 
 func TestLoadConfig_HappyPath(t *testing.T) {
+	defer ResetForTesting()
 	origWd, _ := os.Getwd()
 	defer os.Chdir(origWd)
 
@@ -207,14 +208,6 @@ func TestLoadConfig_HappyPath(t *testing.T) {
 	assert.JSONEq(t, `{"project":"my-proj"}`, string(b.Config))
 }
 
-func TestExpandEnvInValue_NonPointerStruct(t *testing.T) {
-	// expandEnvInValue on a struct (not pointer to struct) process fields normally
-	cfg := Config{Registry: "test"}
-	val := reflect.ValueOf(cfg)
-	err := expandEnvInValue(val)
-	require.NoError(t, err) // structs are handled directly
-}
-
 func TestUnmarshalJSON_Invalid(t *testing.T) {
 	var s SecureString
 	err := s.UnmarshalJSON([]byte(`invalid`))
@@ -222,6 +215,7 @@ func TestUnmarshalJSON_Invalid(t *testing.T) {
 }
 
 func TestLoadConfigNotFound(t *testing.T) {
+	defer ResetForTesting()
 	// Ensure no coach.json in cwd or home
 	origWd, _ := os.Getwd()
 	defer os.Chdir(origWd)

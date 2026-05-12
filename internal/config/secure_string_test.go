@@ -9,102 +9,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSecureString_String_Redacts(t *testing.T) {
+func TestSecureString(t *testing.T) {
+	// Redaction via String(), GoString(), and fmt verbs.
 	s := NewSecureString("secret-value")
 	assert.Equal(t, "[REDACTED]", s.String())
-	assert.Equal(t, "[REDACTED]", s.String())
-	assert.Equal(t, "[REDACTED]", s.String())
+	assert.Equal(t, "[REDACTED]", s.GoString())
+	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%s", s))
+	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%v", s))
 	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%q", s))
-}
+	assert.Equal(t, "%!d(SecureString=[REDACTED])", fmt.Sprintf("%d", s))
 
-func TestSecureString_String_Empty(t *testing.T) {
-	var s SecureString
-	assert.Equal(t, "", s.String())
-}
+	// Empty SecureString returns empty string, not "[REDACTED]".
+	var empty SecureString
+	assert.Equal(t, "", empty.String())
 
-func TestSecureString_Reveal(t *testing.T) {
-	s := NewSecureString("secret-value")
+	// Reveal returns the raw value.
 	assert.Equal(t, "secret-value", s.Reveal())
-}
+	assert.Equal(t, "", empty.Reveal())
 
-func TestSecureString_Reveal_Empty(t *testing.T) {
-	var s SecureString
-	assert.Equal(t, "", s.Reveal())
-}
-
-func TestSecureString_IsEmpty(t *testing.T) {
-	var s SecureString
-	assert.True(t, s.IsEmpty())
-
-	s = NewSecureString("x")
+	// IsEmpty.
+	assert.True(t, empty.IsEmpty())
 	assert.False(t, s.IsEmpty())
+
+	// SetValue.
+	var mutable SecureString
+	mutable.SetValue("new-val")
+	assert.Equal(t, "new-val", mutable.Reveal())
+	assert.Equal(t, "[REDACTED]", mutable.String())
 }
 
-func TestSecureString_SetValue(t *testing.T) {
-	var s SecureString
-	s.SetValue("new-val")
-	assert.Equal(t, "new-val", s.Reveal())
-	assert.Equal(t, "[REDACTED]", s.String())
-}
-
-func TestSecureString_MarshalJSON(t *testing.T) {
+func TestSecureString_JSON(t *testing.T) {
+	// Marshal / unmarshal non-empty.
 	s := NewSecureString("my-secret")
 	data, err := s.MarshalJSON()
 	require.NoError(t, err)
 	assert.Equal(t, `"my-secret"`, string(data))
-}
 
-func TestSecureString_UnmarshalJSON(t *testing.T) {
-	var s SecureString
-	err := s.UnmarshalJSON([]byte(`"my-secret"`))
+	var decoded SecureString
+	err = decoded.UnmarshalJSON([]byte(`"my-secret"`))
 	require.NoError(t, err)
-	assert.Equal(t, "my-secret", s.Reveal())
-	assert.Equal(t, "[REDACTED]", s.String())
-}
+	assert.Equal(t, "my-secret", decoded.Reveal())
+	assert.Equal(t, "[REDACTED]", decoded.String())
 
-func TestSecureString_MarshalJSON_Empty(t *testing.T) {
-	var s SecureString
-	data, err := s.MarshalJSON()
+	// Marshal empty.
+	var empty SecureString
+	data, err = empty.MarshalJSON()
 	require.NoError(t, err)
 	assert.Equal(t, `""`, string(data))
+
+	// Full roundtrip through encoding/json.
+	original := NewSecureString("hello-world")
+	raw, err := json.Marshal(original)
+	require.NoError(t, err)
+
+	var rt SecureString
+	err = json.Unmarshal(raw, &rt)
+	require.NoError(t, err)
+	assert.Equal(t, original.Reveal(), rt.Reveal())
+	assert.Equal(t, "[REDACTED]", rt.String())
 }
 
-func TestSecureString_MarshalText(t *testing.T) {
+func TestSecureString_Text(t *testing.T) {
+	// Marshal / unmarshal text.
 	s := NewSecureString("my-secret")
 	data, err := s.MarshalText()
 	require.NoError(t, err)
 	assert.Equal(t, "my-secret", string(data))
-}
-
-func TestSecureString_UnmarshalText(t *testing.T) {
-	var s SecureString
-	err := s.UnmarshalText([]byte("my-secret"))
-	require.NoError(t, err)
-	assert.Equal(t, "my-secret", s.Reveal())
-}
-
-func TestSecureString_GoString(t *testing.T) {
-	s := NewSecureString("secret-value")
-	assert.Equal(t, "[REDACTED]", s.GoString())
-}
-
-func TestSecureString_Format(t *testing.T) {
-	s := NewSecureString("secret")
-	assert.Equal(t, "[REDACTED]", s.String())
-	assert.Equal(t, "[REDACTED]", s.String())
-	assert.Equal(t, "[REDACTED]", fmt.Sprintf("%q", s))
-	assert.Equal(t, "%!d(SecureString=[REDACTED])", fmt.Sprintf("%d", s))
-}
-
-func TestSecureString_JSON_Roundtrip(t *testing.T) {
-	original := NewSecureString("hello-world")
-	data, err := json.Marshal(original)
-	require.NoError(t, err)
 
 	var decoded SecureString
-	err = json.Unmarshal(data, &decoded)
+	err = decoded.UnmarshalText([]byte("my-secret"))
 	require.NoError(t, err)
-
-	assert.Equal(t, original.Reveal(), decoded.Reveal())
-	assert.True(t, decoded.String() == "[REDACTED]", "decoded String should be redacted")
+	assert.Equal(t, "my-secret", decoded.Reveal())
 }
