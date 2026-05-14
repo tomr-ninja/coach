@@ -76,7 +76,7 @@ func main() {
 	}
 
 	switch cmd.Command() {
-	case "run":
+	case "run": //nolint:goconst // used in multiple switch cases intentionally
 		var data, output string
 		var force bool
 
@@ -113,7 +113,8 @@ func main() {
 			ctx = coach.WithVerbose(ctx)
 		}
 
-		fingerprint, err := coach.Run(ctx, cfg, modelImage, data, output, force)
+		var fingerprint [32]byte
+		fingerprint, err = coach.Run(ctx, cfg, modelImage, data, output, force)
 		if err != nil {
 			handleError(err)
 		}
@@ -132,7 +133,7 @@ func main() {
 					"usage: coach script ls <model-image>"))
 			}
 			modelImage := cmd.Args()[0]
-			if err := validate.ModelImage(modelImage); err != nil {
+			if err = validate.ModelImage(modelImage); err != nil {
 				handleError(err)
 			}
 
@@ -142,7 +143,8 @@ func main() {
 				ctx = coach.WithVerbose(ctx)
 			}
 
-			scripts, err := coach.ListScripts(ctx, modelImage)
+			var scripts []string
+			scripts, err = coach.ListScripts(ctx, modelImage)
 			if err != nil {
 				handleError(err)
 			}
@@ -156,7 +158,7 @@ func main() {
 			scriptRunFlags := flag.NewFlagSet("script run", flag.ExitOnError)
 			scriptRunFlags.StringVar(&data, "data", "./data", "Path to the data folder")
 			scriptRunFlags.StringVar(&output, "output", "./output", "Path to the output folder")
-			if err := scriptRunFlags.Parse(cmd.Args()); err != nil {
+			if err = scriptRunFlags.Parse(cmd.Args()); err != nil {
 				handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 			}
 
@@ -174,16 +176,16 @@ func main() {
 			scriptName := remaining[1]
 			scriptArgs := remaining[2:]
 
-			if err := validate.ModelImage(modelImage); err != nil {
+			if err = validate.ModelImage(modelImage); err != nil {
 				handleError(err)
 			}
-			if err := validate.ScriptName(scriptName); err != nil {
+			if err = validate.ScriptName(scriptName); err != nil {
 				handleError(err)
 			}
-			if err := validate.DirPath(data); err != nil {
+			if err = validate.DirPath(data); err != nil {
 				handleError(fmt.Errorf("validate data path: %w", err))
 			}
-			if err := validate.DirPath(output); err != nil {
+			if err = validate.DirPath(output); err != nil {
 				handleError(fmt.Errorf("validate output dir: %w", err))
 			}
 
@@ -193,7 +195,7 @@ func main() {
 				ctx = coach.WithVerbose(ctx)
 			}
 
-			if err := coach.RunScript(ctx, modelImage, scriptName, scriptArgs, data, output); err != nil {
+			if err = coach.RunScript(ctx, modelImage, scriptName, scriptArgs, data, output); err != nil {
 				handleError(err)
 			}
 
@@ -207,7 +209,7 @@ func main() {
 
 		remoteFlags := flag.NewFlagSet("remote", flag.ExitOnError)
 		remoteFlags.StringVar(&backend, "backend", "", "Backend name from coach.json")
-		if err := remoteFlags.Parse(cmd.Args()); err != nil {
+		if err = remoteFlags.Parse(cmd.Args()); err != nil {
 			handleError(coacherrors.New(coacherrors.KindUser, fmt.Sprintf("error parsing flags: %v", err)))
 		}
 

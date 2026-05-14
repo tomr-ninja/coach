@@ -53,6 +53,8 @@ func sha256Sum(data string) [32]byte {
 	return sha256.Sum256([]byte(data))
 }
 
+const testBucket = "test-bucket"
+
 func TestParseS3URI(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -133,7 +135,7 @@ func TestMaybeTransient(t *testing.T) {
 	})
 
 	t.Run("HTTP 500 becomes transient", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/", nil)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 		httpErr := &smithyhttp.ResponseError{
 			Response: &smithyhttp.Response{
 				Response: &http.Response{
@@ -149,7 +151,7 @@ func TestMaybeTransient(t *testing.T) {
 	})
 
 	t.Run("HTTP 502 becomes transient", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/", nil)
+		req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 		respErr := &smithyhttp.ResponseError{
 			Response: &smithyhttp.Response{
 				Response: &http.Response{
@@ -186,7 +188,7 @@ func TestMaybeTransient(t *testing.T) {
 
 func TestGetS3ChecksumSHA256(t *testing.T) {
 	ctx := context.Background()
-	bucket := "test-bucket"
+	bucket := testBucket
 	key := "test/key"
 
 	t.Run("valid checksum", func(t *testing.T) {
@@ -266,7 +268,7 @@ func TestGetS3ChecksumSHA256(t *testing.T) {
 
 func TestDownloadAndHash(t *testing.T) {
 	ctx := context.Background()
-	bucket := "test-bucket"
+	bucket := testBucket
 	key := "test/key"
 
 	t.Run("rejects object too large by listing size", func(t *testing.T) {
@@ -347,7 +349,7 @@ func (r *errorReader) Read(p []byte) (int, error) {
 
 func TestChecksumsWithClient(t *testing.T) {
 	ctx := context.Background()
-	bucket := "test-bucket"
+	bucket := testBucket
 	prefix := "test-prefix/"
 
 	t.Run("all objects have SHA256 checksum metadata", func(t *testing.T) {
@@ -614,7 +616,7 @@ func TestChecksumsWithClient(t *testing.T) {
 
 func TestArtifactExistsWithClient(t *testing.T) {
 	ctx := context.Background()
-	bucket := "test-bucket"
+	bucket := testBucket
 	prefix := "output/"
 
 	t.Run("objects exist", func(t *testing.T) {
