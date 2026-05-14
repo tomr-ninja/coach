@@ -31,33 +31,56 @@ func TestLimitedBuffer(t *testing.T) {
 }
 
 func TestValidateDriver(t *testing.T) {
-	t.Run("valid executable file", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "driver")
-		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755))
-		err := Validate(path)
-		require.NoError(t, err)
-	})
+	tests := []struct {
+		name         string
+		setup        func(t *testing.T) string
+		wantSentinel error // if non-nil, assert.ErrorIs too
+		wantErr      bool  // if false, expect no error
+	}{
+		{
+			name: "valid executable file",
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "driver")
+				require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755))
+				return path
+			},
+		},
+		{
+			name:         "directory",
+			setup:        func(t *testing.T) string { return t.TempDir() },
+			wantSentinel: errDriverNotFile,
+			wantErr:      true,
+		},
+		{
+			name: "not executable",
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "driver")
+				require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
+				return path
+			},
+			wantSentinel: errDriverNotExecutable,
+			wantErr:      true,
+		},
+		{
+			name:    "missing",
+			setup:   func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") },
+			wantErr: true,
+		},
+	}
 
-	t.Run("directory", func(t *testing.T) {
-		path := t.TempDir()
-		err := Validate(path)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errDriverNotFile)
-	})
-
-	t.Run("not executable", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "driver")
-		require.NoError(t, os.WriteFile(path, []byte(""), 0o644))
-		err := Validate(path)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errDriverNotExecutable)
-	})
-
-	t.Run("missing", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "missing")
-		err := Validate(path)
-		require.Error(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Validate(tt.setup(t))
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			if tt.wantSentinel != nil {
+				assert.ErrorIs(t, err, tt.wantSentinel)
+			}
+		})
+	}
 }
 
 func TestInvokeDriverWithContext(t *testing.T) {

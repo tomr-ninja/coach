@@ -12,34 +12,30 @@ import (
 )
 
 func TestModelImage(t *testing.T) {
-	t.Run("valid with tag", func(t *testing.T) {
-		require.NoError(t, ModelImage("ubuntu:22.04"))
-		require.NoError(t, ModelImage("registry.io/user/model:v1.0"))
-	})
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"valid with tag", "ubuntu:22.04", nil},
+		{"valid with registry and tag", "registry.io/user/model:v1.0", nil},
+		{"valid with digest", "ubuntu@sha256:abc123", nil},
+		{"empty string", "", ErrModelImageEmpty},
+		{"whitespace only", "   ", ErrModelImageEmpty},
+		{"missing tag", "ubuntu", ErrModelImageNoTag},
+		{"missing tag with registry", "registry.io/user/model", ErrModelImageNoTag},
+	}
 
-	t.Run("valid with digest", func(t *testing.T) {
-		require.NoError(t, ModelImage("ubuntu@sha256:abc123"))
-	})
-
-	t.Run("empty string", func(t *testing.T) {
-		err := ModelImage("")
-		require.ErrorIs(t, err, ErrModelImageEmpty)
-	})
-
-	t.Run("whitespace only", func(t *testing.T) {
-		err := ModelImage("   ")
-		require.ErrorIs(t, err, ErrModelImageEmpty)
-	})
-
-	t.Run("missing tag", func(t *testing.T) {
-		err := ModelImage("ubuntu")
-		require.ErrorIs(t, err, ErrModelImageNoTag)
-	})
-
-	t.Run("missing tag with registry", func(t *testing.T) {
-		err := ModelImage("registry.io/user/model")
-		require.ErrorIs(t, err, ErrModelImageNoTag)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ModelImage(tt.input)
+			if tt.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestDirPath(t *testing.T) {
@@ -81,82 +77,82 @@ func TestDirPath(t *testing.T) {
 }
 
 func TestCron(t *testing.T) {
-	t.Run("empty is valid", func(t *testing.T) {
-		require.NoError(t, Cron(""))
-	})
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"empty is valid", "", nil},
+		{"standard 5-field", "0 2 * * *", nil},
+		{"step values", "*/5 * * * *", nil},
+		{"invalid", "not-a-cron", ErrCronExpression},
+		{"too many fields", "0 0 0 0 0 0", ErrCronExpression},
+	}
 
-	t.Run("standard 5-field cron", func(t *testing.T) {
-		require.NoError(t, Cron("0 2 * * *"))
-		require.NoError(t, Cron("*/5 * * * *"))
-	})
-
-	t.Run("invalid cron", func(t *testing.T) {
-		err := Cron("not-a-cron")
-		require.ErrorIs(t, err, ErrCronExpression)
-	})
-
-	t.Run("too many fields", func(t *testing.T) {
-		err := Cron("0 0 0 0 0 0")
-		require.ErrorIs(t, err, ErrCronExpression)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Cron(tt.input)
+			if tt.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestScriptName(t *testing.T) {
-	t.Run("valid names", func(t *testing.T) {
-		require.NoError(t, ScriptName("train.py"))
-		require.NoError(t, ScriptName("run-model"))
-		require.NoError(t, ScriptName("script_1.sh"))
-	})
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"valid py", "train.py", nil},
+		{"valid dash", "run-model", nil},
+		{"valid underscore", "script_1.sh", nil},
+		{"empty", "", ErrScriptNameEmpty},
+		{"contains slash", "../etc/passwd", ErrScriptNamePathSep},
+		{"contains backslash", "..\\etc\\passwd", ErrScriptNamePathSep},
+		{"contains dot-dot", "foo..bar", ErrScriptNameTraversal},
+		{"just dot-dot", "..", ErrScriptNameTraversal},
+		{"whitespace only", "   ", ErrScriptNameEmpty},
+	}
 
-	t.Run("empty", func(t *testing.T) {
-		err := ScriptName("")
-		require.ErrorIs(t, err, ErrScriptNameEmpty)
-	})
-
-	t.Run("contains slash", func(t *testing.T) {
-		err := ScriptName("../etc/passwd")
-		require.ErrorIs(t, err, ErrScriptNamePathSep)
-	})
-
-	t.Run("contains backslash", func(t *testing.T) {
-		err := ScriptName("..\\etc\\passwd")
-		require.ErrorIs(t, err, ErrScriptNamePathSep)
-	})
-
-	t.Run("contains dot-dot", func(t *testing.T) {
-		err := ScriptName("foo..bar")
-		require.ErrorIs(t, err, ErrScriptNameTraversal)
-	})
-
-	t.Run("just dot-dot", func(t *testing.T) {
-		err := ScriptName("..")
-		require.ErrorIs(t, err, ErrScriptNameTraversal)
-	})
-
-	t.Run("whitespace only", func(t *testing.T) {
-		err := ScriptName("   ")
-		require.ErrorIs(t, err, ErrScriptNameEmpty)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ScriptName(tt.input)
+			if tt.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestLocalVsS3(t *testing.T) {
-	t.Run("both local", func(t *testing.T) {
-		require.NoError(t, LocalVsS3("/data", "/output"))
-	})
+	tests := []struct {
+		name    string
+		data    string
+		output  string
+		wantErr error
+	}{
+		{"both local", "/data", "/output", nil},
+		{"both s3", "s3://bucket/data", "s3://bucket/output", nil},
+		{"mixed local-s3", "/data", "s3://bucket/output", ErrMixedLocalS3},
+		{"mixed s3-local", "s3://bucket/data", "/output", ErrMixedLocalS3},
+	}
 
-	t.Run("both s3", func(t *testing.T) {
-		require.NoError(t, LocalVsS3("s3://bucket/data", "s3://bucket/output"))
-	})
-
-	t.Run("mixed local-s3", func(t *testing.T) {
-		err := LocalVsS3("/data", "s3://bucket/output")
-		require.ErrorIs(t, err, ErrMixedLocalS3)
-	})
-
-	t.Run("mixed s3-local", func(t *testing.T) {
-		err := LocalVsS3("s3://bucket/data", "/output")
-		require.ErrorIs(t, err, ErrMixedLocalS3)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := LocalVsS3(tt.data, tt.output)
+			if tt.wantErr == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestSubmitResult(t *testing.T) {
@@ -171,38 +167,37 @@ func TestSubmitResult(t *testing.T) {
 		assert.Contains(t, err.Error(), "empty ID")
 	})
 
-	t.Run("nil result handled by caller", func(t *testing.T) {
-		// Caller checks for nil before calling SubmitResult.
-		// But if they don't, the function will panic (as expected for a programmer error).
-		assert.Panics(t, func() {
-			SubmitResult(nil)
-		})
+	t.Run("nil result panics", func(t *testing.T) {
+		assert.Panics(t, func() { SubmitResult(nil) })
 	})
 }
 
 func TestStatusResult(t *testing.T) {
-	t.Run("valid result", func(t *testing.T) {
-		err := StatusResult(&protocol.StatusResult{ID: "job-123", State: "running"})
-		require.NoError(t, err)
-	})
+	tests := []struct {
+		name      string
+		id        string
+		state     string
+		wantErr   bool
+		wantPanic bool
+		contain   string
+	}{
+		{"valid", "job-123", "running", false, false, ""},
+		{"empty ID", "", "running", true, false, "empty ID"},
+		{"empty State", "job-123", "", true, false, "empty State"},
+		{"both empty", "", "", true, false, "empty ID"},
+	}
 
-	t.Run("empty ID", func(t *testing.T) {
-		err := StatusResult(&protocol.StatusResult{ID: "", State: "running"})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "empty ID")
-	})
-
-	t.Run("empty State", func(t *testing.T) {
-		err := StatusResult(&protocol.StatusResult{ID: "job-123", State: ""})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "empty State")
-	})
-
-	t.Run("both empty", func(t *testing.T) {
-		err := StatusResult(&protocol.StatusResult{ID: "", State: ""})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "empty ID")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := StatusResult(&protocol.StatusResult{ID: tt.id, State: tt.state})
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.contain)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestParseCPU(t *testing.T) {

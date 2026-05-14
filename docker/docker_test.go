@@ -145,27 +145,30 @@ func setupDockerPool(t *testing.T) (*dockertest.Pool, *Client) {
 	return pool, client
 }
 
-// buildTestImage builds a simple Alpine-based image that echoes args and
-// writes to /output. Returns the image tag.
-func buildTestImage(t *testing.T, client *Client) string {
+// buildImageAt builds an image at a specific tag (for tests that need custom prefixes).
+func buildImageAt(t *testing.T, client *Client, dir, dockerfile, tag string) error {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644))
+	buildCtx, err := BuildContextDir(dir)
+	require.NoError(t, err)
+	return client.ImageBuild(context.Background(), buildCtx, tag, "")
+}
+
+// buildImageFromDockerfile builds an image from a Dockerfile string, returns the tag.
+func buildImageFromDockerfile(t *testing.T, client *Client, prefix, dockerfile string) string {
 	t.Helper()
 
-	tmpDir, err := os.MkdirTemp("", "coach-docker-test-*")
+	tmpDir, err := os.MkdirTemp("", "coach-test-"+prefix+"-*")
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
-	dockerfile := `FROM alpine:3.21
-RUN echo "test image ready"
-`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0o644))
 
 	buildCtx, err := BuildContextDir(tmpDir)
 	require.NoError(t, err)
 
-	tag := fmt.Sprintf("coach-test-%x:latest", time.Now().UnixNano())
-	ctx := context.Background()
-
-	err = client.ImageBuild(ctx, buildCtx, tag, "")
+	tag := fmt.Sprintf("coach-test-%s-%x:latest", prefix, time.Now().UnixNano())
+	err = client.ImageBuild(context.Background(), buildCtx, tag, "")
 	require.NoError(t, err, "build should succeed")
 
 	return tag
@@ -180,7 +183,9 @@ func TestNewRealDockerClient(t *testing.T) {
 
 func TestImageBuildAndExists(t *testing.T) {
 	_, client := setupDockerPool(t)
-	tag := buildTestImage(t, client)
+	tag := buildImageFromDockerfile(t, client, "base", `FROM alpine:3.21
+RUN echo "test image ready"
+`)
 	ctx := context.Background()
 
 	exists, err := client.ImageExists(ctx, tag)
@@ -190,7 +195,9 @@ func TestImageBuildAndExists(t *testing.T) {
 
 func TestEnsureImageDigest(t *testing.T) {
 	_, client := setupDockerPool(t)
-	tag := buildTestImage(t, client)
+	tag := buildImageFromDockerfile(t, client, "base", `FROM alpine:3.21
+RUN echo "test image ready"
+`)
 	ctx := context.Background()
 
 	digest, err := client.EnsureImageDigest(ctx, tag, "")
@@ -200,7 +207,9 @@ func TestEnsureImageDigest(t *testing.T) {
 
 func TestImageEntrypoint(t *testing.T) {
 	_, client := setupDockerPool(t)
-	tag := buildTestImage(t, client)
+	tag := buildImageFromDockerfile(t, client, "base", `FROM alpine:3.21
+RUN echo "test image ready"
+`)
 	ctx := context.Background()
 
 	_, cmd, err := client.ImageEntrypoint(ctx, tag)
@@ -225,7 +234,9 @@ func TestRun_OutputWritten(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "input.txt"), []byte("hello"), 0o644))
 
 	// Build a custom image that copies /data/input.txt to /output/result.txt
-	customTag := buildCopyImage(t, client)
+	customTag := buildImageFromDockerfile(t, client, "copy", `FROM alpine:3.21
+CMD ["sh", "-c", "cp /data/input.txt /output/result.txt"]
+`)
 
 	ctx := context.Background()
 	err = client.Run(ctx, customTag, dataDir, outputDir)
@@ -237,56 +248,15 @@ func TestRun_OutputWritten(t *testing.T) {
 	assert.Equal(t, "hello", string(result))
 }
 
-// buildCopyImage builds an image that copies /data/input.txt to /output/result.txt
-func buildCopyImage(t *testing.T, client *Client) string {
-	t.Helper()
-
-	tmpDir, err := os.MkdirTemp("", "coach-docker-test-copy-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-
-	dockerfile := `FROM alpine:3.21
-CMD ["sh", "-c", "cp /data/input.txt /output/result.txt"]
-`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0o644))
-
-	buildCtx, err := BuildContextDir(tmpDir)
-	require.NoError(t, err)
-
-	tag := fmt.Sprintf("coach-test-copy-%x:latest", time.Now().UnixNano())
-	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag, "")
-	require.NoError(t, err)
-
-	return tag
-}
-
 func TestRunWrapped_EnvVars(t *testing.T) {
 	_, client := setupDockerPool(t)
 
-	// Build a simple image that echoes env vars
-	tmpDir, err := os.MkdirTemp("", "coach-test-wrap-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-
-	dockerfile := `FROM alpine:3.21
+	tag := buildImageFromDockerfile(t, client, "wrap", `FROM alpine:3.21
 CMD ["sh", "-c", "echo $TEST_VAR"]
-`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0o644))
+`)
 
-	buildCtx, err := BuildContextDir(tmpDir)
-	require.NoError(t, err)
-
-	tag := fmt.Sprintf("coach-test-wrap-%x:latest", time.Now().UnixNano())
-	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag, "")
-	require.NoError(t, err)
-
-	envVars := map[string]string{
-		"TEST_VAR": "hello_wrapped",
-	}
-	err = client.RunWrapped(ctx, tag, envVars)
-	require.NoError(t, err, "RunWrapped should succeed (we can't check stdout easily, but no error = ok)")
+	err := client.RunWrapped(context.Background(), tag, map[string]string{"TEST_VAR": "hello_wrapped"})
+	require.NoError(t, err, "RunWrapped should succeed")
 }
 
 func TestRunScript(t *testing.T) {
@@ -432,24 +402,11 @@ func TestContainerExit_Error(t *testing.T) {
 	require.NoError(t, os.MkdirAll(outputDir, 0o755))
 
 	// Build an image that exits with code 1
-	buildDir, err := os.MkdirTemp("", "coach-test-exit-build-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(buildDir) })
-
-	dockerfile := `FROM alpine:3.21
+	tag := buildImageFromDockerfile(t, client, "exit", `FROM alpine:3.21
 CMD ["sh", "-c", "echo 'failing!' >&2; exit 1"]
-`
-	require.NoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0o644))
+`)
 
-	buildCtx, err := BuildContextDir(buildDir)
-	require.NoError(t, err)
-
-	tag := fmt.Sprintf("coach-test-exit-%x:latest", time.Now().UnixNano())
-	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag, "")
-	require.NoError(t, err)
-
-	err = client.Run(ctx, tag, dataDir, outputDir)
+	err = client.Run(context.Background(), tag, dataDir, outputDir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exited with non-zero code", "should report exit code error")
 }
@@ -495,22 +452,10 @@ func TestContainerIsolation(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dataDir, "input.txt"), []byte("isolated"), 0o644))
 
 	// Build image that reads /data and writes to /output
-	buildDir, err := os.MkdirTemp("", "coach-test-iso-build-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(buildDir) })
-
-	dockerfile := `FROM alpine:3.21
+	tag := buildImageFromDockerfile(t, coachClient, "iso", `FROM alpine:3.21
 CMD ["sh", "-c", "cat /data/input.txt | tr '[:lower:]' '[:upper:]' > /output/result.txt"]
-`
-	require.NoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0o644))
-
-	buildCtx, err := BuildContextDir(buildDir)
-	require.NoError(t, err)
-
-	tag := fmt.Sprintf("coach-test-iso-%x:latest", time.Now().UnixNano())
+`)
 	ctx := context.Background()
-	err = coachClient.ImageBuild(ctx, buildCtx, tag, "")
-	require.NoError(t, err)
 
 	err = coachClient.Run(ctx, tag, dataDir, outputDir)
 	require.NoError(t, err)
@@ -525,31 +470,19 @@ func TestMultipleBuildsWithSameTag(t *testing.T) {
 
 	tag := fmt.Sprintf("coach-test-rebuild-%x:latest", time.Now().UnixNano())
 
-	tmpDir, err := os.MkdirTemp("", "coach-test-rebuild-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
-
+	tmpDir := t.TempDir()
 	dockerfile := `FROM alpine:3.21
 RUN echo "build 1" > /version.txt
 `
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0o644))
-
-	buildCtx, err := BuildContextDir(tmpDir)
-	require.NoError(t, err)
-
-	ctx := context.Background()
 
 	// First build
-	err = client.ImageBuild(ctx, buildCtx, tag, "")
-	require.NoError(t, err)
+	require.NoError(t, buildImageAt(t, client, tmpDir, dockerfile, tag))
 
 	// Second build with same tag - should overwrite
-	buildCtx2, err := BuildContextDir(tmpDir)
-	require.NoError(t, err)
+	require.NoError(t, buildImageAt(t, client, tmpDir, dockerfile, tag),
+		"rebuilding with same tag should succeed")
 
-	err = client.ImageBuild(ctx, buildCtx2, tag, "")
-	require.NoError(t, err, "rebuilding with same tag should succeed")
-
+	ctx := context.Background()
 	exists, err := client.ImageExists(ctx, tag)
 	require.NoError(t, err)
 	assert.True(t, exists)
@@ -571,7 +504,9 @@ func TestEnsureImageDigest_PullsIfAbsent(t *testing.T) {
 
 func TestImageRemove(t *testing.T) {
 	_, client := setupDockerPool(t)
-	tag := buildTestImage(t, client)
+	tag := buildImageFromDockerfile(t, client, "base", `FROM alpine:3.21
+RUN echo "test image ready"
+`)
 	ctx := context.Background()
 
 	exists, err := client.ImageExists(ctx, tag)
@@ -612,30 +547,21 @@ func TestImageList_All(t *testing.T) {
 func TestImageList_FilterByPrefix(t *testing.T) {
 	_, client := setupDockerPool(t)
 
-	// Build an image with the wrapper prefix
 	tmpDir, err := os.MkdirTemp("", "coach-test-listfilter-*")
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
-	dockerfile := `FROM alpine:3.21
-RUN echo "wrapped test" > /test.txt
-`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile), 0o644))
-
-	buildCtx, err := BuildContextDir(tmpDir)
-	require.NoError(t, err)
-
 	tag := fmt.Sprintf("coach-wrapped-test-listfilter-%x:latest", time.Now().UnixNano())
-	ctx := context.Background()
-	err = client.ImageBuild(ctx, buildCtx, tag, "")
+	err = buildImageAt(t, client, tmpDir, `FROM alpine:3.21
+RUN echo "wrapped test" > /test.txt
+`, tag)
 	require.NoError(t, err)
 
-	// Clean up after test
 	t.Cleanup(func() {
 		_ = client.ImageRemove(context.Background(), tag, true)
 	})
 
-	// List with the wrapper prefix filter
+	ctx := context.Background()
 	images, err := client.ImageList(ctx, "coach-wrapped-*")
 	require.NoError(t, err)
 

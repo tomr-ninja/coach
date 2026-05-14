@@ -11,82 +11,118 @@ import (
 )
 
 func TestCollectChecksums(t *testing.T) {
-	t.Run("single file", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte("hello"), 0o644))
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) string
+		check func(t *testing.T, got [][32]byte, err error)
+	}{
+		{
+			name: "single file",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte("hello"), 0o644))
+				return dir
+			},
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				require.Len(t, got, 1)
+				want := sha256.Sum256([]byte("hello"))
+				assert.Equal(t, want, got[0])
+			},
+		},
+		{
+			name: "multiple files sorted",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644))
+				return dir
+			},
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				require.Len(t, got, 2)
+			},
+		},
+		{
+			name: "ignores directories",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644))
+				require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+				return dir
+			},
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				require.Len(t, got, 1)
+			},
+		},
+		{
+			name: "coachignore filtering",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "skip.txt"), []byte("skip"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".coachignore"), []byte("skip.txt\n"), 0o644))
+				return dir
+			},
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				require.Len(t, got, 1)
+				want := sha256.Sum256([]byte("keep"))
+				assert.Equal(t, want, got[0])
+			},
+		},
+		{
+			name: "ignores meta files",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte("x"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".coachignore"), []byte("\n"), 0o644))
+				return dir
+			},
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				require.Len(t, got, 1)
+			},
+		},
+		{
+			name:  "empty dir",
+			setup: func(t *testing.T) string { return t.TempDir() },
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				assert.Empty(t, got)
+			},
+		},
+		{
+			name: "subdirectory files",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("b"), 0o644))
+				return dir
+			},
+			check: func(t *testing.T, got [][32]byte, err error) {
+				require.NoError(t, err)
+				assert.Len(t, got, 2)
+			},
+		},
+		{
+			name:  "non-existent path",
+			setup: func(t *testing.T) string { return filepath.Join(t.TempDir(), "does-not-exist") },
+			check: func(t *testing.T, _ [][32]byte, err error) {
+				require.Error(t, err)
+			},
+		},
+	}
 
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		want := sha256.Sum256([]byte("hello"))
-		assert.Equal(t, want, got[0])
-	})
-
-	t.Run("multiple files sorted order", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644))
-
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		require.Len(t, got, 2)
-	})
-
-	t.Run("ignores directories", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("x"), 0o644))
-		require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
-
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-	})
-
-	t.Run("coachignore", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("keep"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "skip.txt"), []byte("skip"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, ".coachignore"), []byte("skip.txt\n"), 0o644))
-
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		want := sha256.Sum256([]byte("keep"))
-		assert.Equal(t, want, got[0])
-	})
-
-	t.Run("ignores meta files", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte("x"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, ".coachignore"), []byte("\n"), 0o644))
-
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-	})
-
-	t.Run("empty dir", func(t *testing.T) {
-		dir := t.TempDir()
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		assert.Empty(t, got)
-	})
-
-	t.Run("subdirectory files", func(t *testing.T) {
-		dir := t.TempDir()
-		require.NoError(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("b"), 0o644))
-
-		got, err := CollectChecksums(dir)
-		require.NoError(t, err)
-		assert.Len(t, got, 2)
-	})
-
-	t.Run("non-existent path", func(t *testing.T) {
-		_, err := CollectChecksums(filepath.Join(t.TempDir(), "does-not-exist"))
-		require.Error(t, err)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := tt.setup(t)
+			got, err := CollectChecksums(dir)
+			tt.check(t, got, err)
+		})
+	}
 }
 
 func TestFingerprint(t *testing.T) {

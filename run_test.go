@@ -11,66 +11,90 @@ import (
 	"github.com/tomr-ninja/coach/internal/validate"
 )
 
-func TestBuildS3ContainerEnv(t *testing.T) {
-	cfg := &config.Config{
-		S3: config.S3Config{
-			AccessKeyID:     config.NewSecureString("key"),
-			SecretAccessKey: config.NewSecureString("secret"),
-			Region:          "us-west-2",
-			Endpoint:        "http://minio:9000",
+func TestS3WrapperEnvVars(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *config.Config
+		pathIn  string
+		pathOut string
+		digest  string
+		check   func(t *testing.T, got map[string]string)
+	}{
+		{
+			name: "full config with endpoint and webhook",
+			cfg: &config.Config{
+				S3: config.S3Config{
+					AccessKeyID:     config.NewSecureString("key"),
+					SecretAccessKey: config.NewSecureString("secret"),
+					Region:          "us-west-2",
+					Endpoint:        "http://minio:9000",
+				},
+				WebhookURL: "https://hooks.example.com/notify",
+			},
+			pathIn:  "bucket/data",
+			pathOut: "bucket/output/",
+			digest:  "abc123",
+			check: func(t *testing.T, got map[string]string) {
+				assert.Equal(t, "bucket/data", got["S3_PATH_IN"])
+				assert.Equal(t, "bucket/output/", got["S3_PATH_OUT_PREFIX"])
+				assert.Equal(t, "abc123", got["COACH_IMAGE_DIGEST"])
+				assert.Equal(t, "https://hooks.example.com/notify", got["COACH_WEBHOOK_URL"])
+				assert.Equal(t, "key", got["AWS_ACCESS_KEY_ID"])
+				assert.Equal(t, "secret", got["AWS_SECRET_ACCESS_KEY"])
+				assert.Equal(t, "us-west-2", got["AWS_REGION"])
+				assert.Equal(t, "http://minio:9000", got["AWS_ENDPOINT_URL"])
+			},
 		},
-		WebhookURL: "https://hooks.example.com/notify",
+		{
+			name: "no endpoint, no webhook",
+			cfg: &config.Config{
+				S3: config.S3Config{
+					AccessKeyID:     config.NewSecureString("ak"),
+					SecretAccessKey: config.NewSecureString("sk"),
+					Region:          "eu-west-1",
+				},
+			},
+			pathIn:  "in/data",
+			pathOut: "out/",
+			digest:  "ff",
+			check: func(t *testing.T, got map[string]string) {
+				assert.Equal(t, "in/data", got["S3_PATH_IN"])
+				assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
+				assert.Equal(t, "ff", got["COACH_IMAGE_DIGEST"])
+				assert.Equal(t, "", got["COACH_WEBHOOK_URL"])
+				assert.Equal(t, "ak", got["AWS_ACCESS_KEY_ID"])
+				assert.Equal(t, "sk", got["AWS_SECRET_ACCESS_KEY"])
+				assert.Equal(t, "eu-west-1", got["AWS_REGION"])
+				_, hasEndpoint := got["AWS_ENDPOINT_URL"]
+				assert.False(t, hasEndpoint, "AWS_ENDPOINT_URL should not be set when endpoint is empty")
+			},
+		},
+		{
+			name: "empty image digest",
+			cfg: &config.Config{
+				S3: config.S3Config{
+					AccessKeyID:     config.NewSecureString("key"),
+					SecretAccessKey: config.NewSecureString("secret"),
+					Region:          "us-east-1",
+				},
+			},
+			pathIn:  "data",
+			pathOut: "out/",
+			digest:  "",
+			check: func(t *testing.T, got map[string]string) {
+				assert.Equal(t, "", got["COACH_IMAGE_DIGEST"])
+				assert.Equal(t, "data", got["S3_PATH_IN"])
+				assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
+			},
+		},
 	}
 
-	got := s3WrapperEnvVars(cfg, "bucket/data", "bucket/output/", "abc123")
-
-	assert.Equal(t, "bucket/data", got["S3_PATH_IN"])
-	assert.Equal(t, "bucket/output/", got["S3_PATH_OUT_PREFIX"])
-	assert.Equal(t, "abc123", got["COACH_IMAGE_DIGEST"])
-	assert.Equal(t, "https://hooks.example.com/notify", got["COACH_WEBHOOK_URL"])
-	assert.Equal(t, "key", got["AWS_ACCESS_KEY_ID"])
-	assert.Equal(t, "secret", got["AWS_SECRET_ACCESS_KEY"])
-	assert.Equal(t, "us-west-2", got["AWS_REGION"])
-	assert.Equal(t, "http://minio:9000", got["AWS_ENDPOINT_URL"])
-}
-
-func TestBuildS3ContainerEnv_NoEndpoint(t *testing.T) {
-	cfg := &config.Config{
-		S3: config.S3Config{
-			AccessKeyID:     config.NewSecureString("ak"),
-			SecretAccessKey: config.NewSecureString("sk"),
-			Region:          "eu-west-1",
-		},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s3WrapperEnvVars(tt.cfg, tt.pathIn, tt.pathOut, tt.digest)
+			tt.check(t, got)
+		})
 	}
-
-	got := s3WrapperEnvVars(cfg, "in/data", "out/", "ff")
-
-	assert.Equal(t, "in/data", got["S3_PATH_IN"])
-	assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
-	assert.Equal(t, "ff", got["COACH_IMAGE_DIGEST"])
-	assert.Equal(t, "", got["COACH_WEBHOOK_URL"])
-	assert.Equal(t, "ak", got["AWS_ACCESS_KEY_ID"])
-	assert.Equal(t, "sk", got["AWS_SECRET_ACCESS_KEY"])
-	assert.Equal(t, "eu-west-1", got["AWS_REGION"])
-	// AWS_ENDPOINT_URL should be absent when endpoint is empty.
-	_, hasEndpoint := got["AWS_ENDPOINT_URL"]
-	assert.False(t, hasEndpoint, "AWS_ENDPOINT_URL should not be set when endpoint is empty")
-}
-
-func TestBuildS3ContainerEnv_EmptyImageDigest(t *testing.T) {
-	cfg := &config.Config{
-		S3: config.S3Config{
-			AccessKeyID:     config.NewSecureString("key"),
-			SecretAccessKey: config.NewSecureString("secret"),
-			Region:          "us-east-1",
-		},
-	}
-
-	got := s3WrapperEnvVars(cfg, "data", "out/", "")
-
-	assert.Equal(t, "", got["COACH_IMAGE_DIGEST"])
-	assert.Equal(t, "data", got["S3_PATH_IN"])
-	assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
 }
 
 func TestRun_ValidationErrors(t *testing.T) {

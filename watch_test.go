@@ -35,62 +35,34 @@ func TestParseS3LogURI(t *testing.T) {
 	}
 }
 
+// smithyError constructs a smithy http.ResponseError for table-driven tests.
+func smithyError(code int, msg string) error {
+	return &smithyhttp.ResponseError{
+		Response: &smithyhttp.Response{Response: &http.Response{StatusCode: code}},
+		Err:      errors.New(msg),
+	}
+}
+
 func TestIsNotFound(t *testing.T) {
-	t.Run("smithy ResponseError with 404", func(t *testing.T) {
-		respErr := &smithyhttp.ResponseError{
-			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 404}},
-			Err:      errors.New("not found"),
-		}
-		assert.True(t, isNotFound(respErr))
-	})
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"smithy 404", smithyError(404, "not found"), true},
+		{"smithy 403", smithyError(403, "forbidden"), false},
+		{"smithy 200", smithyError(200, "ok"), false},
+		{"plain error with 404", errors.New("got 404 response"), true},
+		{"plain error with NotFound", errors.New("object NotFound"), true},
+		{"plain error with NoSuchKey", errors.New("NoSuchKey: the specified key does not exist"), true},
+		{"plain error without clues", errors.New("connection timeout"), false},
+		{"wrapped smithy 404", fmt.Errorf("head object failed: %w", smithyError(404, "not found")), true},
+		{"wrapped smithy 403", fmt.Errorf("head object failed: %w", smithyError(403, "forbidden")), false},
+	}
 
-	t.Run("smithy ResponseError with 403", func(t *testing.T) {
-		respErr := &smithyhttp.ResponseError{
-			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 403}},
-			Err:      errors.New("forbidden"),
-		}
-		assert.False(t, isNotFound(respErr))
-	})
-
-	t.Run("smithy ResponseError with 200", func(t *testing.T) {
-		respErr := &smithyhttp.ResponseError{
-			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 200}},
-			Err:      errors.New("ok"),
-		}
-		assert.False(t, isNotFound(respErr))
-	})
-
-	t.Run("plain error containing 404", func(t *testing.T) {
-		assert.True(t, isNotFound(errors.New("got 404 response")))
-	})
-
-	t.Run("plain error containing NotFound", func(t *testing.T) {
-		assert.True(t, isNotFound(errors.New("object NotFound")))
-	})
-
-	t.Run("plain error containing NoSuchKey", func(t *testing.T) {
-		assert.True(t, isNotFound(errors.New("NoSuchKey: the specified key does not exist")))
-	})
-
-	t.Run("plain error without not-found clues", func(t *testing.T) {
-		assert.False(t, isNotFound(errors.New("connection timeout")))
-	})
-
-	t.Run("wrapped smithy error with 404", func(t *testing.T) {
-		respErr := &smithyhttp.ResponseError{
-			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 404}},
-			Err:      errors.New("not found"),
-		}
-		wrapped := fmt.Errorf("head object failed: %w", respErr)
-		assert.True(t, isNotFound(wrapped))
-	})
-
-	t.Run("wrapped smithy error with 403", func(t *testing.T) {
-		respErr := &smithyhttp.ResponseError{
-			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 403}},
-			Err:      errors.New("forbidden"),
-		}
-		wrapped := fmt.Errorf("head object failed: %w", respErr)
-		assert.False(t, isNotFound(wrapped))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNotFound(tt.err))
+		})
+	}
 }

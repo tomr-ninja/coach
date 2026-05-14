@@ -11,48 +11,54 @@ import (
 	"github.com/tomr-ninja/coach/protocol"
 )
 
-func TestResolveS3ArtifactFingerprint_InvalidHex(t *testing.T) {
-	// Invalid hex string (not valid hex characters).
-	_, _, err := resolveS3ArtifactFingerprint(
-		context.Background(),
-		"xyz%%%invalid%%%hex",
-		"s3://bucket/data",
-		"s3://bucket/output",
-		&config.Config{},
-		false,
-	)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid image digest hex")
-}
+func TestResolveS3ArtifactFingerprint(t *testing.T) {
+	s3in := "s3://bucket/data"
+	s3out := "s3://bucket/output"
 
-func TestResolveS3ArtifactFingerprint_WrongDigestLength(t *testing.T) {
-	// Valid hex but only 16 bytes instead of 32.
-	_, _, err := resolveS3ArtifactFingerprint(
-		context.Background(),
-		"aabbccddeeff00112233445566778899", // 32 hex chars = 16 bytes
-		"s3://bucket/data",
-		"s3://bucket/output",
-		&config.Config{},
-		false,
-	)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, errInvalidImageDigest)
-	assert.Contains(t, err.Error(), "expected 32 bytes, got 16")
-}
+	tests := []struct {
+		name        string
+		digestStr   string
+		wantErr     error
+		wantContain string
+	}{
+		{
+			name:        "invalid hex characters",
+			digestStr:   "xyz%%%invalid%%%hex",
+			wantContain: "invalid image digest hex",
+		},
+		{
+			name:        "wrong digest length (16 bytes)",
+			digestStr:   "aabbccddeeff00112233445566778899",
+			wantErr:     errInvalidImageDigest,
+			wantContain: "expected 32 bytes, got 16",
+		},
+		{
+			name:        "wrong digest length (33 bytes)",
+			digestStr:   "aabbccddeeff00112233445566778899aabbccddeeff0011223344556677889900",
+			wantErr:     errInvalidImageDigest,
+			wantContain: "expected 32 bytes, got 33",
+		},
+	}
 
-func TestResolveS3ArtifactFingerprint_WrongDigestLengthTooLong(t *testing.T) {
-	// 64 hex chars = 32 bytes, but we're giving 66 chars = 33 bytes.
-	_, _, err := resolveS3ArtifactFingerprint(
-		context.Background(),
-		"aabbccddeeff00112233445566778899aabbccddeeff0011223344556677889900", // 66 hex chars = 33 bytes
-		"s3://bucket/data",
-		"s3://bucket/output",
-		&config.Config{},
-		false,
-	)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, errInvalidImageDigest)
-	assert.Contains(t, err.Error(), "expected 32 bytes, got 33")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := resolveS3ArtifactFingerprint(
+				context.Background(),
+				tt.digestStr,
+				s3in,
+				s3out,
+				&config.Config{},
+				false,
+			)
+			assert.Error(t, err)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			}
+			if tt.wantContain != "" {
+				assert.Contains(t, err.Error(), tt.wantContain)
+			}
+		})
+	}
 }
 
 func TestRemoteRun_ValidationErrors(t *testing.T) {

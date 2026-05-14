@@ -14,66 +14,78 @@ import (
 )
 
 func TestExpandEnvString(t *testing.T) {
-	t.Run("not env var", func(t *testing.T) {
-		got, err := expandEnvString("hello")
-		require.NoError(t, err)
-		assert.Equal(t, "hello", got)
-	})
+	tests := []struct {
+		name    string
+		envKey  string
+		envVal  string
+		input   string
+		want    string
+		wantErr error
+	}{
+		{"not env var", "", "", "hello", "hello", nil},
+		{"env var set", "COACH_TEST_VAR", "value123", "$COACH_TEST_VAR", "value123", nil},
+		{"env var not set", "", "", "$COACH_MISSING_VAR", "", errEnvVarNotSet},
+	}
 
-	t.Run("env var set", func(t *testing.T) {
-		t.Setenv("COACH_TEST_VAR", "value123")
-		got, err := expandEnvString("$COACH_TEST_VAR")
-		require.NoError(t, err)
-		assert.Equal(t, "value123", got)
-	})
-
-	t.Run("env var not set", func(t *testing.T) {
-		got, err := expandEnvString("$COACH_MISSING_VAR")
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errEnvVarNotSet)
-		assert.Contains(t, coacherrors.GetHint(err), "replace \"COACH_MISSING_VAR\" with a literal value")
-		assert.Empty(t, got)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envKey != "" {
+				t.Setenv(tt.envKey, tt.envVal)
+			}
+			got, err := expandEnvString(tt.input)
+			if tt.wantErr != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantErr)
+				assert.Contains(t, coacherrors.GetHint(err), "replace")
+				assert.Empty(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
 }
 
 func TestExpandEnvInConfig(t *testing.T) {
-	t.Run("empty", func(t *testing.T) {
-		got, err := expandEnvInConfig(nil)
-		require.NoError(t, err)
-		assert.Empty(t, got)
-	})
+	tests := []struct {
+		name     string
+		env      map[string]string
+		input    string
+		want     string
+		wantErr  error
+		wantHint string
+	}{
+		{"empty raw", nil, "", "", nil, ""},
+		{"no env vars", nil, `{"key":"value"}`, `{"key":"value"}`, nil, ""},
+		{"single expansion", map[string]string{"COACH_SECRET": "my-secret"}, `{"key":"$COACH_SECRET"}`, `{"key":"my-secret"}`, nil, ""},
+		{"missing env var", nil, `{"key":"$COACH_MISSING"}`, "", errEnvVarNotSet, "COACH_MISSING"},
+		{"multiple expansions", map[string]string{"COACH_A": "alpha", "COACH_B": "beta"}, `{"a":"$COACH_A","b":"$COACH_B"}`, `{"a":"alpha","b":"beta"}`, nil, ""},
+	}
 
-	t.Run("no env vars", func(t *testing.T) {
-		raw := json.RawMessage(`{"key":"value"}`)
-		got, err := expandEnvInConfig(raw)
-		require.NoError(t, err)
-		assert.Equal(t, raw, got)
-	})
-
-	t.Run("expands env var", func(t *testing.T) {
-		t.Setenv("COACH_SECRET", "my-secret")
-		raw := json.RawMessage(`{"key":"$COACH_SECRET"}`)
-		got, err := expandEnvInConfig(raw)
-		require.NoError(t, err)
-		assert.Equal(t, `{"key":"my-secret"}`, string(got))
-	})
-
-	t.Run("missing env var errors", func(t *testing.T) {
-		raw := json.RawMessage(`{"key":"$COACH_MISSING"}`)
-		_, err := expandEnvInConfig(raw)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, errEnvVarNotSet)
-		assert.Contains(t, coacherrors.GetHint(err), "replace \"COACH_MISSING\" with a literal value")
-	})
-
-	t.Run("multiple env vars", func(t *testing.T) {
-		t.Setenv("COACH_A", "alpha")
-		t.Setenv("COACH_B", "beta")
-		raw := json.RawMessage(`{"a":"$COACH_A","b":"$COACH_B"}`)
-		got, err := expandEnvInConfig(raw)
-		require.NoError(t, err)
-		assert.Equal(t, `{"a":"alpha","b":"beta"}`, string(got))
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			var raw json.RawMessage
+			if tt.input != "" {
+				raw = json.RawMessage(tt.input)
+			}
+			got, err := expandEnvInConfig(raw)
+			if tt.wantErr != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantErr)
+				assert.Contains(t, coacherrors.GetHint(err), tt.wantHint)
+			} else {
+				require.NoError(t, err)
+				if tt.input == "" {
+					assert.Empty(t, got)
+				} else {
+					assert.Equal(t, tt.want, string(got))
+				}
+			}
+		})
+	}
 }
 
 func TestExpandEnvInStruct(t *testing.T) {

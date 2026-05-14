@@ -12,72 +12,120 @@ import (
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
 )
 
-func TestRetrySuccess(t *testing.T) {
-	val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (string, error) {
-		return "done", nil
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, "done", val)
-}
+func TestRetry(t *testing.T) {
+	tests := []struct {
+		name   string
+		config coacherrors.RetryConfig
+		run    func(t *testing.T)
+	}{
+		{
+			name:   "success on first try",
+			config: coacherrors.RetryConfig{},
+			run: func(t *testing.T) {
+				val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (string, error) {
+					return "done", nil
+				})
+				assert.NoError(t, err)
+				assert.Equal(t, "done", val)
+			},
+		},
+		{
+			name:   "transient succeeds on retry",
+			config: coacherrors.RetryConfig{},
+			run: func(t *testing.T) {
+				calls := 0
+				val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (int, error) {
+					calls++
+					if calls < 3 {
+						return 0, coacherrors.AsTransient(fmt.Errorf("temporary error %d", calls))
+					}
+					return 42, nil
+				})
+				assert.NoError(t, err)
+				assert.Equal(t, 42, val)
+				assert.Equal(t, 3, calls)
+			},
+		},
+		{
+			name:   "non-transient stops immediately",
+			config: coacherrors.RetryConfig{},
+			run: func(t *testing.T) {
+				calls := 0
+				_, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (struct{}, error) {
+					calls++
+					return struct{}{}, coacherrors.New(coacherrors.KindUser, "permanent error")
+				})
+				assert.Error(t, err)
+				assert.Equal(t, 1, calls)
+			},
+		},
+		{
+			name:   "raw error stops immediately",
+			config: coacherrors.RetryConfig{},
+			run: func(t *testing.T) {
+				calls := 0
+				_, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (struct{}, error) {
+					calls++
+					return struct{}{}, fmt.Errorf("raw error")
+				})
+				assert.Error(t, err)
+				assert.Equal(t, 1, calls)
+			},
+		},
+		{
+			name:   "retryAll retries non-transient",
+			config: coacherrors.RetryConfig{RetryAll: true},
+			run: func(t *testing.T) {
+				calls := 0
+				val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{RetryAll: true}, func() (int, error) {
+					calls++
+					if calls < 3 {
+						return 0, errors.New("non-transient error")
+					}
+					return 7, nil
+				})
+				assert.NoError(t, err)
+				assert.Equal(t, 7, val)
+				assert.Equal(t, 3, calls)
+			},
+		},
+		{
+			name:   "maxRetries exhausted",
+			config: coacherrors.RetryConfig{MaxRetries: 2},
+			run: func(t *testing.T) {
+				calls := 0
+				transientErr := coacherrors.AsTransient(fmt.Errorf("always fails"))
+				_, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{MaxRetries: 2}, func() (struct{}, error) {
+					calls++
+					return struct{}{}, transientErr
+				})
+				assert.Error(t, err)
+				assert.Equal(t, 3, calls)
+			},
+		},
+		{
+			name:   "wrapped transient is detected",
+			config: coacherrors.RetryConfig{},
+			run: func(t *testing.T) {
+				calls := 0
+				transient := coacherrors.AsTransient(fmt.Errorf("transient"))
+				val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (string, error) {
+					calls++
+					if calls < 2 {
+						return "", fmt.Errorf("outer: %w", transient)
+					}
+					return "ok", nil
+				})
+				assert.NoError(t, err)
+				assert.Equal(t, "ok", val)
+				assert.Equal(t, 2, calls)
+			},
+		},
+	}
 
-func TestRetryTransientSucceedsOnRetry(t *testing.T) {
-	calls := 0
-	val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (int, error) {
-		calls++
-		if calls < 3 {
-			return 0, coacherrors.AsTransient(fmt.Errorf("temporary error %d", calls))
-		}
-		return 42, nil
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 42, val)
-	assert.Equal(t, 3, calls)
-}
-
-func TestRetryNonTransientStopsImmediately(t *testing.T) {
-	calls := 0
-	_, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (struct{}, error) {
-		calls++
-		return struct{}{}, coacherrors.New(coacherrors.KindUser, "permanent error")
-	})
-	assert.Error(t, err)
-	assert.Equal(t, 1, calls)
-}
-
-func TestRetryRawErrorStopsImmediately(t *testing.T) {
-	calls := 0
-	_, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (struct{}, error) {
-		calls++
-		return struct{}{}, fmt.Errorf("raw error")
-	})
-	assert.Error(t, err)
-	assert.Equal(t, 1, calls)
-}
-
-func TestRetryConfigRetryAll(t *testing.T) {
-	calls := 0
-	val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{RetryAll: true}, func() (int, error) {
-		calls++
-		if calls < 3 {
-			return 0, errors.New("non-transient error")
-		}
-		return 7, nil
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, 7, val)
-	assert.Equal(t, 3, calls)
-}
-
-func TestRetryConfigMaxRetries(t *testing.T) {
-	calls := 0
-	transientErr := coacherrors.AsTransient(fmt.Errorf("always fails"))
-
-	_, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{MaxRetries: 2}, func() (struct{}, error) {
-		calls++
-		return struct{}{}, transientErr
-	})
-	assert.Error(t, err)
-	assert.Equal(t, 3, calls)
+	for _, tt := range tests {
+		t.Run(tt.name, tt.run)
+	}
 }
 
 func TestRetryContextCancellation(t *testing.T) {
@@ -99,20 +147,4 @@ func TestRetryContextCancellation(t *testing.T) {
 
 	err := <-done
 	assert.ErrorIs(t, err, context.Canceled)
-}
-
-func TestRetryWrappedTransient(t *testing.T) {
-	calls := 0
-	transient := coacherrors.AsTransient(fmt.Errorf("transient"))
-
-	val, err := coacherrors.Retry(context.Background(), coacherrors.RetryConfig{}, func() (string, error) {
-		calls++
-		if calls < 2 {
-			return "", fmt.Errorf("outer: %w", transient)
-		}
-		return "ok", nil
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, "ok", val)
-	assert.Equal(t, 2, calls)
 }
