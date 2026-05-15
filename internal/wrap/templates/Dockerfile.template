@@ -1,17 +1,15 @@
 # Stage 1: Build coach-sidecar
-FROM golang:1.26-alpine AS builder
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY internal/artifact/ internal/artifact/
-COPY internal/storage/ internal/storage/
-COPY internal/config/ internal/config/
-COPY internal/errors/ internal/errors/
-COPY cmd/coach-sidecar/ cmd/coach-sidecar/
-RUN CGO_ENABLED=0 GOOS={{.TargetOS}} GOARCH={{.TargetArch}} go build -o /coach-sidecar ./cmd/coach-sidecar/
+# Builds natively, cross-compiles to target via GOOS/GOARCH.
+FROM --platform={{.BuilderOS}}/{{.BuilderArch}} golang:1.26-alpine AS builder
+ARG COACH_VERSION={{.CoachVersion}}
+WORKDIR /build
+RUN go mod init build && \
+    go get github.com/tomr-ninja/coach/cmd/coach-sidecar@${COACH_VERSION}
+RUN CGO_ENABLED=0 GOOS={{.TargetOS}} GOARCH={{.TargetArch}} \
+    go build -o /coach-sidecar github.com/tomr-ninja/coach/cmd/coach-sidecar
 
 # Stage 2: Wrapper image
-FROM {{.BaseImage}}
+FROM --platform={{.TargetOS}}/{{.TargetArch}} {{.BaseImage}}
 COPY --from=builder /coach-sidecar /usr/local/bin/coach-sidecar
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

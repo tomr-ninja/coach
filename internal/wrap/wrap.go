@@ -7,15 +7,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"text/template"
 
 	"github.com/tomr-ninja/coach/docker"
 	"github.com/tomr-ninja/coach/internal/utils"
+	"github.com/tomr-ninja/coach/internal/version"
 )
 
 var (
@@ -26,18 +26,15 @@ var (
 	dockerfileTemplate string
 )
 
-var (
-	// ErrNoRegistry is returned when a registry is required but not configured.
-	ErrNoRegistry = errors.New("registry is required for remote S3 runs (set in coach.json)")
-
-	errGoModNotFound = errors.New("go.mod not found in any parent directory")
-)
+// ErrNoRegistry is returned when a registry is required but not configured.
+var ErrNoRegistry = errors.New("registry is required for remote S3 runs (set in coach.json)")
 
 // Image builds a wrapper Docker image on top of the base model image.
 //
 // targetPlatform is an optional "os/arch" specifier (e.g., "linux/amd64").
 // When empty, the platform is auto-detected from the locally available base image.
 // The coach-sidecar binary is cross-compiled inside a multi-stage Docker build.
+// The source code is fetched from GitHub at the commit pinned in version.Commit.
 func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registryAuth, targetPlatform string, entrypoint []string) (string, error) {
 	safeName := utils.SanitizeImageName(baseImage)
 	shortFP := randomSuffix()
@@ -51,28 +48,6 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registry
 		return "", fmt.Errorf("create temp dir: %w", tmpErr)
 	}
 	defer os.RemoveAll(tmpDir)
-
-	// Copy Go source files needed by the multi-stage Docker build.
-	moduleRoot, err := moduleRootDir()
-	if err != nil {
-		return "", fmt.Errorf("find module root: %w", err)
-	}
-	err = copyFile(filepath.Join(moduleRoot, "go.mod"), filepath.Join(tmpDir, "go.mod"))
-	if err != nil {
-		return "", fmt.Errorf("copy go.mod: %w", err)
-	}
-	err = copyFile(filepath.Join(moduleRoot, "go.sum"), filepath.Join(tmpDir, "go.sum"))
-	if err != nil {
-		return "", fmt.Errorf("copy go.sum: %w", err)
-	}
-	err = copyDir(filepath.Join(moduleRoot, "internal", "artifact"), filepath.Join(tmpDir, "internal", "artifact"))
-	if err != nil {
-		return "", fmt.Errorf("copy internal/artifact: %w", err)
-	}
-	err = copyDir(filepath.Join(moduleRoot, "cmd", "coach-sidecar"), filepath.Join(tmpDir, "cmd", "coach-sidecar"))
-	if err != nil {
-		return "", fmt.Errorf("copy cmd/coach-sidecar: %w", err)
-	}
 
 	var runCommand string
 	if len(entrypoint) > 0 {
@@ -133,7 +108,14 @@ func Image(ctx context.Context, dc *docker.Client, baseImage, registry, registry
 		return "", fmt.Errorf("create Dockerfile: %w", tmpErr)
 	}
 	defer dockerfile.Close()
-	if tmpErr = tmpl.Execute(dockerfile, map[string]string{"BaseImage": baseImage, "TargetOS": targetOS, "TargetArch": targetArch}); tmpErr != nil {
+	if tmpErr = tmpl.Execute(dockerfile, map[string]string{
+		"BaseImage":    baseImage,
+		"TargetOS":     targetOS,
+		"TargetArch":   targetArch,
+		"BuilderOS":    runtime.GOOS,
+		"BuilderArch":  runtime.GOARCH,
+		"CoachVersion": version.Commit,
+	}); tmpErr != nil {
 		return "", fmt.Errorf("render Dockerfile: %w", tmpErr)
 	}
 	dockerfile.Close()
@@ -169,60 +151,4 @@ func randomSuffix() string {
 		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
 	return hex.EncodeToString(b)
-}
-
-// moduleRootDir finds the Go module root directory by walking up from the
-// current directory until go.mod is found.
-func moduleRootDir() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", errGoModNotFound
-		}
-		dir = parent
-	}
-}
-
-func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	s, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer s.Close()
-
-	d, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	_, err = io.Copy(d, s)
-	return err
-}
-
-func copyDir(srcRoot, dstRoot string) error {
-	return filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(srcRoot, path)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(dstRoot, rel)
-		if d.IsDir() {
-			return os.MkdirAll(dst, 0o755)
-		}
-		return copyFile(path, dst)
-	})
 }
