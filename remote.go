@@ -41,45 +41,45 @@ func RemoteRun(
 	resources protocol.Resources,
 	labels map[string]string,
 	force bool,
-) (id string, logS3URI string, err error) {
+) (id string, logS3URI string, runS3URI string, err error) {
 	if verr := validate.ModelImage(modelImage); verr != nil {
-		return "", "", fmt.Errorf("validate model image: %w", verr)
+		return "", "", "", fmt.Errorf("validate model image: %w", verr)
 	}
 	if verr := validate.DirPath(dataSource); verr != nil {
-		return "", "", fmt.Errorf("validate data source: %w", verr)
+		return "", "", "", fmt.Errorf("validate data source: %w", verr)
 	}
 	if verr := validate.DirPath(outputURI); verr != nil {
-		return "", "", fmt.Errorf("validate output destination: %w", verr)
+		return "", "", "", fmt.Errorf("validate output destination: %w", verr)
 	}
 	if script != "" {
 		if verr := validate.ScriptName(script); verr != nil {
-			return "", "", fmt.Errorf("validate script name: %w", verr)
+			return "", "", "", fmt.Errorf("validate script name: %w", verr)
 		}
 	}
 
 	backend, err := cfg.Backend(backendName)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	if err = driver.Validate(backend.Driver); err != nil {
-		return "", "", fmt.Errorf("validate driver: %w", err)
+		return "", "", "", fmt.Errorf("validate driver: %w", err)
 	}
 
 	vErr := validate.LocalVsS3(dataSource, outputURI)
 	if vErr != nil {
-		return "", "", vErr
+		return "", "", "", vErr
 	}
 
 	client, err := docker.NewClient()
 	if err != nil {
-		return "", "", fmt.Errorf("create docker client: %w", err)
+		return "", "", "", fmt.Errorf("create docker client: %w", err)
 	}
 	defer client.Close()
 
 	imageDigestHex, err := resolveImageDigestHex(ctx, client, modelImage)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	var model protocol.Model
@@ -89,7 +89,7 @@ func RemoteRun(
 	if strings.HasPrefix(dataSource, "s3://") {
 		model, wrappedImage, fpHex, err = wrapModelForRemoteRun(ctx, client, modelImage, imageDigestHex, dataSource, outputURI, cfg, command, script, backend.Platform, force)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 	} else {
 		model = protocol.Model{
@@ -123,14 +123,14 @@ func RemoteRun(
 				fmt.Fprintf(os.Stderr, "warning: cleanup wrapper image %s: %v\n", wrappedImage, rmErr)
 			}
 		}
-		return "", "", fmt.Errorf("invoke driver: %w", err)
+		return "", "", "", fmt.Errorf("invoke driver: %w", err)
 	}
 
 	if result.SubmitResult == nil {
-		return "", "", errNoSubmitResult
+		return "", "", "", errNoSubmitResult
 	}
 	if err := validate.SubmitResult(result.SubmitResult); err != nil {
-		return "", "", fmt.Errorf("validate submit result: %w", err)
+		return "", "", "", fmt.Errorf("validate submit result: %w", err)
 	}
 
 	// Build S3 log path for --watch.
@@ -139,10 +139,12 @@ func RemoteRun(
 		if !strings.HasSuffix(outputPrefix, "/") {
 			outputPrefix += "/"
 		}
-		logS3URI = fmt.Sprintf("s3://%s%s/.coach/log.txt", outputPrefix, fpHex)
+		s3Base := fmt.Sprintf("s3://%s%s", outputPrefix, fpHex)
+		logS3URI = s3Base + "/.coach/log.txt"
+		runS3URI = s3Base + "/.coach/run.json"
 	}
 
-	return result.SubmitResult.ID, logS3URI, nil
+	return result.SubmitResult.ID, logS3URI, runS3URI, nil
 }
 
 // RemoteSchedule submits a recurring training schedule to a remote backend.

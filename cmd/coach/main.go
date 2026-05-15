@@ -276,7 +276,7 @@ func main() {
 			if verbose {
 				ctx = coach.WithVerbose(ctx)
 			}
-			id, logS3URI, err := coach.RemoteRun(ctx, cfg, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
+			id, logS3URI, runS3URI, err := coach.RemoteRun(ctx, cfg, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
 			if err != nil {
 				handleError(err)
 			}
@@ -285,7 +285,7 @@ func main() {
 			if watch {
 				coach.WatchS3Log(ctx, cfg, logS3URI)
 			}
-			coach.FetchAndPrintRunJSON(ctx, cfg, logS3URI)
+			coach.FetchAndPrintRunJSON(ctx, cfg, runS3URI)
 
 		case "schedule":
 			var (

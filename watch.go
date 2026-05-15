@@ -188,17 +188,15 @@ func (w *s3LogWatcher) checkDone(ctx context.Context) bool {
 	return true
 }
 
-// FetchAndPrintRunJSON fetches /output/.coach/run.json from S3 (derived from
-// logS3URI) and pretty-prints it to stdout. Does nothing if logS3URI is empty.
-func FetchAndPrintRunJSON(ctx context.Context, cfg *config.Config, logS3URI string) {
-	if logS3URI == "" {
+// FetchAndPrintRunJSON fetches run.json from S3 and pretty-prints it to stdout.
+// Does nothing if runS3URI is empty.
+func FetchAndPrintRunJSON(ctx context.Context, cfg *config.Config, runS3URI string) {
+	if runS3URI == "" {
 		return
 	}
 
-	bucket, logKey := parseS3LogURI(logS3URI)
-	// Derive run.json key from log.txt key.
-	runKey := strings.Replace(logKey, "log.txt", "run.json", 1)
-	if bucket == "" || runKey == "" {
+	bucket, key := parseS3LogURI(runS3URI)
+	if bucket == "" || key == "" {
 		return
 	}
 
@@ -213,7 +211,7 @@ func FetchAndPrintRunJSON(ctx context.Context, cfg *config.Config, logS3URI stri
 
 	resp, err := s3Client.GetObject(getCtx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
-		Key:    aws.String(runKey),
+		Key:    aws.String(key),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fetch run.json: %v\n", err)

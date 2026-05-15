@@ -68,7 +68,7 @@ func TestRemoteRun_ValidationErrors(t *testing.T) {
 		{
 			name: "invalid model image",
 			fn: func(ctx context.Context) error {
-				_, _, err := RemoteRun(ctx, &config.Config{}, "", "", "s3://in", "s3://out", nil, "", protocol.Resources{}, nil, false)
+				_, _, _, err := RemoteRun(ctx, &config.Config{}, "", "", "s3://in", "s3://out", nil, "", protocol.Resources{}, nil, false)
 				return err
 			},
 			wantErr: validate.ErrModelImageEmpty,
@@ -76,7 +76,7 @@ func TestRemoteRun_ValidationErrors(t *testing.T) {
 		{
 			name: "invalid data source",
 			fn: func(ctx context.Context) error {
-				_, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", "", "s3://out", nil, "", protocol.Resources{}, nil, false)
+				_, _, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", "", "s3://out", nil, "", protocol.Resources{}, nil, false)
 				return err
 			},
 			wantErr: validate.ErrDirEmpty,
@@ -84,7 +84,7 @@ func TestRemoteRun_ValidationErrors(t *testing.T) {
 		{
 			name: "invalid output URI",
 			fn: func(ctx context.Context) error {
-				_, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", "s3://in", "", nil, "", protocol.Resources{}, nil, false)
+				_, _, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", "s3://in", "", nil, "", protocol.Resources{}, nil, false)
 				return err
 			},
 			wantErr: validate.ErrDirEmpty,
@@ -92,7 +92,7 @@ func TestRemoteRun_ValidationErrors(t *testing.T) {
 		{
 			name: "invalid script name",
 			fn: func(ctx context.Context) error {
-				_, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", "s3://in", "s3://out", nil, "../bad", protocol.Resources{}, nil, false)
+				_, _, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", "s3://in", "s3://out", nil, "../bad", protocol.Resources{}, nil, false)
 				return err
 			},
 			wantErr: validate.ErrScriptNamePathSep,
@@ -100,7 +100,7 @@ func TestRemoteRun_ValidationErrors(t *testing.T) {
 		{
 			name: "no backend configured",
 			fn: func(ctx context.Context) error {
-				_, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", tmpDir, tmpDir, nil, "", protocol.Resources{}, nil, false)
+				_, _, _, err := RemoteRun(ctx, &config.Config{}, "", "ubuntu:22.04", tmpDir, tmpDir, nil, "", protocol.Resources{}, nil, false)
 				return err
 			},
 			wantContain: "no backend configured",
