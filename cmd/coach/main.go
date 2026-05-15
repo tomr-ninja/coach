@@ -285,6 +285,7 @@ func main() {
 			if watch {
 				coach.WatchS3Log(ctx, cfg, logS3URI)
 			}
+			coach.FetchAndPrintRunJSON(ctx, cfg, logS3URI)
 
 		case "schedule":
 			var (

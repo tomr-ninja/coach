@@ -2,6 +2,7 @@ package coach
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/tomr-ninja/coach/internal/config"
 	"github.com/tomr-ninja/coach/internal/storage"
+	"github.com/tomr-ninja/coach/protocol"
 )
 
 // WatchS3Log polls an S3 log file and prints new lines to stdout.
@@ -186,6 +188,60 @@ func (w *s3LogWatcher) checkDone(ctx context.Context) bool {
 	return true
 }
 
+// FetchAndPrintRunJSON fetches /output/.coach/run.json from S3 (derived from
+// logS3URI) and pretty-prints it to stdout. Does nothing if logS3URI is empty.
+func FetchAndPrintRunJSON(ctx context.Context, cfg *config.Config, logS3URI string) {
+	if logS3URI == "" {
+		return
+	}
+
+	bucket, logKey := parseS3LogURI(logS3URI)
+	// Derive run.json key from log.txt key.
+	runKey := strings.Replace(logKey, "log.txt", "run.json", 1)
+	if bucket == "" || runKey == "" {
+		return
+	}
+
+	s3Client, err := storage.NewS3Client(ctx, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fetch run.json: create S3 client: %v\n", err)
+		return
+	}
+
+	getCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	resp, err := s3Client.GetObject(getCtx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(runKey),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fetch run.json: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB cap
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fetch run.json: read: %v\n", err)
+		return
+	}
+
+	var result protocol.RunResult
+	if err = json.Unmarshal(data, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "fetch run.json: parse: %v\n", err)
+		return
+	}
+
+	// Pretty-print the run result.
+	pretty, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fetch run.json: format: %v\n", err)
+		return
+	}
+	fmt.Println(string(pretty))
+}
+
 func parseS3LogURI(uri string) (bucket, key string) {
 	rest := strings.TrimPrefix(uri, "s3://")
 	bucket, key, _ = strings.Cut(rest, "/")
@@ -193,8 +249,7 @@ func parseS3LogURI(uri string) (bucket, key string) {
 }
 
 func isNotFound(err error) bool {
-	var respErr *smithyhttp.ResponseError
-	if errors.As(err, &respErr) {
+	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok {
 		return respErr.HTTPStatusCode() == http.StatusNotFound
 	}
 	s := err.Error()

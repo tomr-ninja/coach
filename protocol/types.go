@@ -1,5 +1,7 @@
 package protocol
 
+import "encoding/json"
+
 const Version = 1
 
 type Spec struct {
@@ -81,4 +83,25 @@ type ScheduleEntry struct {
 	Schedule string `json:"schedule,omitempty"`
 	Status   string `json:"status"`
 	URL      string `json:"url,omitempty"`
+}
+
+// RunResult is the unified payload written to /output/.coach/run.json
+// AND sent as the webhook body on job completion. Both files are identical.
+type RunResult struct {
+	// From the initial run.json (written by the wrapper entrypoint).
+	ModelImage  string `json:"modelImage"`
+	ModelDigest string `json:"modelDigest"`
+	Fingerprint string `json:"fingerprint"`
+	DataSource  string `json:"dataSource"`
+	StartTime   string `json:"startTime"`
+
+	// Added by coach-sidecar finish at job completion.
+	EndTime  string `json:"endTime,omitempty"`
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
+	UploadOk bool   `json:"uploadOk"`
+
+	// Embedded output files (if present).
+	Metrics json.RawMessage `json:"metrics,omitempty"`
+	Meta    json.RawMessage `json:"meta,omitempty"`
 }

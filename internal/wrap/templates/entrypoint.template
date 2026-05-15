@@ -114,6 +114,7 @@ PIPE_EXIT=$?
 S3_PATH_OUT=$(cat "$S3_PATH_FILE" 2>/dev/null)
 if [ -n "$S3_PATH_OUT" ] && [ -f "$LOG_FILE" ]; then
   coach-sidecar upload-file "$LOG_FILE" "s3://${S3_PATH_OUT}/.coach/log.txt" 2>/dev/null || true
+  coach-sidecar upload-file "$OUTPUT_DIR/.coach/run.json" "s3://${S3_PATH_OUT}/.coach/run.json" 2>/dev/null || true
   echo "done" > /tmp/coach-done
   coach-sidecar upload-file /tmp/coach-done "s3://${S3_PATH_OUT}/.coach/DONE" 2>/dev/null || true
 fi

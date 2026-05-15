@@ -22,6 +22,7 @@ import (
 
 	"github.com/tomr-ninja/coach/internal/artifact"
 	"github.com/tomr-ninja/coach/internal/storage"
+	"github.com/tomr-ninja/coach/protocol"
 )
 
 var (
@@ -37,6 +38,7 @@ var (
 	errFinishRequest     = errors.New("finish hook: create request")
 	errFinishPost        = errors.New("finish hook: POST failed")
 	errFinishHTTP        = errors.New("finish hook: got HTTP error")
+	errWriteRunJSON      = errors.New("finish hook: write run.json")
 )
 
 func main() {
@@ -331,8 +333,8 @@ func doUpload(localDir, s3Dest string) error {
 		if relErr != nil {
 			return relErr
 		}
-		// Skip log and DONE marker — they're uploaded after the pipeline finishes.
-		if rel == filepath.Join(".coach", "log.txt") || rel == filepath.Join(".coach", "DONE") {
+		// Skip log, DONE marker, and run.json — they're uploaded after the pipeline finishes.
+		if rel == filepath.Join(".coach", "log.txt") || rel == filepath.Join(".coach", "DONE") || rel == filepath.Join(".coach", "run.json") {
 			return nil
 		}
 		files = append(files, fileEntry{path: path, rel: rel})
@@ -481,16 +483,9 @@ func trimSpace(s string) string {
 	return s
 }
 
-// finishPayload is the JSON body sent to the webhook on run completion.
-type finishPayload struct {
-	Fingerprint string          `json:"fingerprint"`
-	Success     bool            `json:"success"`
-	Error       string          `json:"error,omitempty"`
-	UploadOk    bool            `json:"uploadOk"`
-	Metrics     json.RawMessage `json:"metrics,omitempty"`
-	Meta        json.RawMessage `json:"meta,omitempty"`
-	Run         json.RawMessage `json:"run,omitempty"`
-}
+// runPayload is the unified JSON body written to /output/.coach/run.json
+// and sent to the webhook on run completion. Both are identical.
+type runPayload = protocol.RunResult
 
 func cmdFinish(args []string) {
 	var outputDir, fingerprint, stderrFile string
@@ -543,16 +538,27 @@ func cmdFinish(args []string) {
 }
 
 func doFinish(outputDir, fingerprint, stderrFile string, exitCode int, uploadOk bool) error {
-	webhookURL := os.Getenv("COACH_WEBHOOK_URL")
-	if webhookURL == "" {
-		fmt.Fprintf(os.Stderr, "COACH_WEBHOOK_URL not set, skipping finish hook\n")
-		return nil
-	}
-
-	payload := finishPayload{
+	payload := runPayload{
 		Fingerprint: fingerprint,
 		Success:     exitCode == 0,
 		UploadOk:    uploadOk,
+		EndTime:     time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Merge the initial run.json (written by the entrypoint) into the payload.
+	// #nosec G703 -- outputDir comes from container entrypoint args
+	if runData, err := os.ReadFile(filepath.Join(outputDir, ".coach", "run.json")); err == nil {
+		var base runPayload
+		if json.Unmarshal(runData, &base) == nil {
+			payload.ModelImage = base.ModelImage
+			payload.ModelDigest = base.ModelDigest
+			payload.DataSource = base.DataSource
+			payload.StartTime = base.StartTime
+			// Fingerprint from initial run.json takes precedence if not given as arg.
+			if payload.Fingerprint == "" {
+				payload.Fingerprint = base.Fingerprint
+			}
+		}
 	}
 
 	if exitCode != 0 && stderrFile != "" {
@@ -580,15 +586,25 @@ func doFinish(outputDir, fingerprint, stderrFile string, exitCode int, uploadOk 
 		fmt.Fprintf(os.Stderr, "finish hook: loaded meta.json\n")
 	}
 
-	//nolint:gosec // CLI sidecar: outputDir comes from container entrypoint args
-	if runData, err := os.ReadFile(filepath.Join(outputDir, ".coach", "run.json")); err == nil && len(runData) <= maxFileSize && json.Valid(runData) {
-		payload.Run = runData
-		fmt.Fprintf(os.Stderr, "finish hook: loaded run.json\n")
-	}
-
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errFinishMarshal, err)
+	}
+
+	// Write the unified payload back to run.json.
+	// #nosec G703 -- outputDir comes from container entrypoint args
+	runJSONPath := filepath.Join(outputDir, ".coach", "run.json")
+	// #nosec G703 -- runJSONPath derived from trusted outputDir
+	if wErr := os.WriteFile(runJSONPath, body, 0o600); wErr != nil {
+		return fmt.Errorf("%w: %w", errWriteRunJSON, wErr)
+	}
+	fmt.Fprintf(os.Stderr, "finish hook: wrote run.json (%d bytes)\n", len(body))
+
+	// Send the webhook if configured.
+	webhookURL := os.Getenv("COACH_WEBHOOK_URL")
+	if webhookURL == "" {
+		fmt.Fprintf(os.Stderr, "COACH_WEBHOOK_URL not set, skipping webhook POST\n")
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
