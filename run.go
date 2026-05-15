@@ -123,7 +123,7 @@ func RunS3(ctx context.Context, cfg *config.Config, modelImage, s3DataSource, s3
 
 	s3PathIn := strings.TrimPrefix(s3DataSource, "s3://")
 
-	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
+	envVars := s3WrapperEnvVars(cfg, modelImage, s3PathIn, s3PathOutPrefix, imageDigestHex)
 	if err := wrapAndRunS3(ctx, client, modelImage, envVars); err != nil {
 		return artifact.Zero, err
 	}
@@ -155,9 +155,10 @@ func resolveArtifactDir(ctx context.Context, client *docker.Client, modelImage s
 }
 
 // s3WrapperEnvVars builds env vars for an S3 wrapper container.
-func s3WrapperEnvVars(cfg *config.Config, s3PathIn, s3PathOutPrefix, imageDigestHex string) map[string]string {
+func s3WrapperEnvVars(cfg *config.Config, modelImage, s3PathIn, s3PathOutPrefix, imageDigestHex string) map[string]string {
 	s3 := cfg.S3
 	envVars := map[string]string{
+		"COACH_MODEL_IMAGE":     modelImage,
 		"S3_PATH_IN":            s3PathIn,
 		"S3_PATH_OUT_PREFIX":    s3PathOutPrefix,
 		"COACH_IMAGE_DIGEST":    imageDigestHex,

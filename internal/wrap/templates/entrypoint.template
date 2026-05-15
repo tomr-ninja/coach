@@ -33,6 +33,17 @@ run_phases() {
   if [ -n "$FP" ]; then
     echo "--- Phase 2: Running Application ---"
 
+    # Write run.json metadata for the coach.
+    cat > "$OUTPUT_DIR/.coach/run.json" <<RUNEOF
+{
+  "modelImage": "$COACH_MODEL_IMAGE",
+  "modelDigest": "$COACH_IMAGE_DIGEST",
+  "fingerprint": "$FP",
+  "dataSource": "s3://${S3_PATH_IN}",
+  "startTime": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+RUNEOF
+
     # Clean up stale markers from previous --force runs so --watch
     # doesn't see a pre-existing DONE marker.
     coach-sidecar delete-file "s3://${S3_PATH_OUT}/.coach/DONE" 2>/dev/null || true

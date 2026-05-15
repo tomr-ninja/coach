@@ -13,15 +13,17 @@ import (
 
 func TestS3WrapperEnvVars(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     *config.Config
-		pathIn  string
-		pathOut string
-		digest  string
-		check   func(t *testing.T, got map[string]string)
+		name       string
+		cfg        *config.Config
+		modelImage string
+		pathIn     string
+		pathOut    string
+		digest     string
+		check      func(t *testing.T, got map[string]string)
 	}{
 		{
-			name: "full config with endpoint and webhook",
+			name:       "full config with endpoint and webhook",
+			modelImage: "my-model:v1",
 			cfg: &config.Config{
 				S3: config.S3Config{
 					AccessKeyID:     config.NewSecureString("key"),
@@ -35,7 +37,7 @@ func TestS3WrapperEnvVars(t *testing.T) {
 			pathOut: "bucket/output/",
 			digest:  "abc123",
 			check: func(t *testing.T, got map[string]string) {
-				assert.Equal(t, "bucket/data", got["S3_PATH_IN"])
+				assert.Equal(t, "my-model:v1", got["COACH_MODEL_IMAGE"])
 				assert.Equal(t, "bucket/output/", got["S3_PATH_OUT_PREFIX"])
 				assert.Equal(t, "abc123", got["COACH_IMAGE_DIGEST"])
 				assert.Equal(t, "https://hooks.example.com/notify", got["COACH_WEBHOOK_URL"])
@@ -46,7 +48,8 @@ func TestS3WrapperEnvVars(t *testing.T) {
 			},
 		},
 		{
-			name: "no endpoint, no webhook",
+			name:       "no endpoint, no webhook",
+			modelImage: "other:latest",
 			cfg: &config.Config{
 				S3: config.S3Config{
 					AccessKeyID:     config.NewSecureString("ak"),
@@ -58,7 +61,7 @@ func TestS3WrapperEnvVars(t *testing.T) {
 			pathOut: "out/",
 			digest:  "ff",
 			check: func(t *testing.T, got map[string]string) {
-				assert.Equal(t, "in/data", got["S3_PATH_IN"])
+				assert.Equal(t, "other:latest", got["COACH_MODEL_IMAGE"])
 				assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
 				assert.Equal(t, "ff", got["COACH_IMAGE_DIGEST"])
 				assert.Equal(t, "", got["COACH_WEBHOOK_URL"])
@@ -70,7 +73,8 @@ func TestS3WrapperEnvVars(t *testing.T) {
 			},
 		},
 		{
-			name: "empty image digest",
+			name:       "empty image digest",
+			modelImage: "",
 			cfg: &config.Config{
 				S3: config.S3Config{
 					AccessKeyID:     config.NewSecureString("key"),
@@ -82,6 +86,7 @@ func TestS3WrapperEnvVars(t *testing.T) {
 			pathOut: "out/",
 			digest:  "",
 			check: func(t *testing.T, got map[string]string) {
+				assert.Equal(t, "", got["COACH_MODEL_IMAGE"])
 				assert.Equal(t, "", got["COACH_IMAGE_DIGEST"])
 				assert.Equal(t, "data", got["S3_PATH_IN"])
 				assert.Equal(t, "out/", got["S3_PATH_OUT_PREFIX"])
@@ -91,7 +96,7 @@ func TestS3WrapperEnvVars(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := s3WrapperEnvVars(tt.cfg, tt.pathIn, tt.pathOut, tt.digest)
+			got := s3WrapperEnvVars(tt.cfg, tt.modelImage, tt.pathIn, tt.pathOut, tt.digest)
 			tt.check(t, got)
 		})
 	}

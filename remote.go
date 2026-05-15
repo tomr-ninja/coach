@@ -418,7 +418,7 @@ func wrapModelForRemoteRun(
 	fpHex := fmt.Sprintf("%x", fp)
 
 	s3PathIn := strings.TrimPrefix(dataSource, "s3://")
-	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
+	envVars := s3WrapperEnvVars(cfg, modelImage, s3PathIn, s3PathOutPrefix, imageDigestHex)
 
 	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
 	if err != nil {
@@ -465,7 +465,7 @@ func wrapModelForS3Schedule(
 		s3PathOutPrefix += "/"
 	}
 
-	envVars := s3WrapperEnvVars(cfg, s3PathIn, s3PathOutPrefix, imageDigestHex)
+	envVars := s3WrapperEnvVars(cfg, modelImage, s3PathIn, s3PathOutPrefix, imageDigestHex)
 
 	entrypoint, _, err := client.ImageEntrypoint(ctx, modelImage)
 	if err != nil {

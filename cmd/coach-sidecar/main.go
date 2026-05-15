@@ -489,6 +489,7 @@ type finishPayload struct {
 	UploadOk    bool            `json:"uploadOk"`
 	Metrics     json.RawMessage `json:"metrics,omitempty"`
 	Meta        json.RawMessage `json:"meta,omitempty"`
+	Run         json.RawMessage `json:"run,omitempty"`
 }
 
 func cmdFinish(args []string) {
@@ -577,6 +578,12 @@ func doFinish(outputDir, fingerprint, stderrFile string, exitCode int, uploadOk 
 	if metaData, err := os.ReadFile(filepath.Join(outputDir, "meta.json")); err == nil && len(metaData) <= maxFileSize && json.Valid(metaData) {
 		payload.Meta = metaData
 		fmt.Fprintf(os.Stderr, "finish hook: loaded meta.json\n")
+	}
+
+	//nolint:gosec // CLI sidecar: outputDir comes from container entrypoint args
+	if runData, err := os.ReadFile(filepath.Join(outputDir, ".coach", "run.json")); err == nil && len(runData) <= maxFileSize && json.Valid(runData) {
+		payload.Run = runData
+		fmt.Fprintf(os.Stderr, "finish hook: loaded run.json\n")
 	}
 
 	body, err := json.Marshal(payload)
