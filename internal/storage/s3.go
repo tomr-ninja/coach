@@ -31,9 +31,8 @@ type s3Client interface {
 }
 
 var (
-	ErrNoObjects   = errors.New("no objects found at s3 location")
-	ErrNotS3URI    = errors.New("not an s3 uri")
-	ErrInvalidPath = errors.New("invalid s3 path")
+	ErrNoObjects = errors.New("no objects found at s3 location")
+	ErrNotS3URI  = errors.New("not an s3 uri")
 )
 
 const (
@@ -205,12 +204,9 @@ func ParseURI(uri string) (bucket, prefix string, err error) {
 }
 
 // ParsePathOut splits an S3 output path (without s3:// prefix) into bucket and prefix.
+// Delegates to ParseURI by prepending s3://.
 func ParsePathOut(path string) (bucket, prefix string, err error) {
-	bucket, prefix, found := strings.Cut(path, "/")
-	if !found {
-		return "", "", fmt.Errorf("%w: %s", ErrInvalidPath, path)
-	}
-	return bucket, prefix, nil
+	return ParseURI("s3://" + path)
 }
 
 // ErrObjectTooLarge means the S3 object exceeds the max checksum download size.

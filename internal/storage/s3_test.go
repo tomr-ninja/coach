@@ -100,7 +100,7 @@ func TestParseS3PathOut(t *testing.T) {
 	}{
 		{"bucket and prefix", "bucket/output/abcd", "bucket", "output/abcd", false},
 		{"nested prefix", "my-bucket/data/results/fingerprint", "my-bucket", "data/results/fingerprint", false},
-		{"no slash", "bucketonly", "", "", true},
+		{"no slash", "bucketonly", "bucketonly", "", false},
 		{"empty string", "", "", "", true},
 		{"slash only", "/", "", "", false},
 		{"slash at end", "bucket/prefix/", "bucket", "prefix/", false},

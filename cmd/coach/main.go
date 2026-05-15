@@ -16,6 +16,7 @@ import (
 	"github.com/tomr-ninja/coach"
 	"github.com/tomr-ninja/coach/internal/config"
 	coacherrors "github.com/tomr-ninja/coach/internal/errors"
+	"github.com/tomr-ninja/coach/internal/utils"
 	"github.com/tomr-ninja/coach/internal/validate"
 )
 
@@ -110,7 +111,7 @@ func main() {
 		ctx, cancel := signalContext()
 		defer cancel()
 		if verbose {
-			ctx = coach.WithVerbose(ctx)
+			ctx = utils.WithVerbose(ctx)
 		}
 
 		var fingerprint [32]byte
@@ -140,7 +141,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 
 			var scripts []string
@@ -192,7 +193,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 
 			if err = coach.RunScript(ctx, modelImage, scriptName, scriptArgs, data, output); err != nil {
@@ -274,7 +275,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 			id, logS3URI, runS3URI, err := coach.RemoteRun(ctx, cfg, backend, modelImage, dataSource, outputURI, command, script, resources, labelMap, force)
 			if err != nil {
@@ -346,7 +347,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 			id, err := coach.RemoteSchedule(ctx, cfg, backend, modelImage, dataSource, outputURI, sched, command, script, resources, labelMap)
 			if err != nil {
@@ -358,7 +359,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 			entries, err := coach.RemoteList(ctx, cfg, backend)
 			if err != nil {
@@ -382,7 +383,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 			if err := coach.RemoteDelete(ctx, cfg, backend, id); err != nil {
 				handleError(err)
@@ -397,7 +398,7 @@ func main() {
 			ctx, cancel := signalContext()
 			defer cancel()
 			if verbose {
-				ctx = coach.WithVerbose(ctx)
+				ctx = utils.WithVerbose(ctx)
 			}
 			status, err := coach.RemoteStatus(ctx, cfg, backend, id)
 			if err != nil {
@@ -443,7 +444,7 @@ func main() {
 		ctx, cancel := signalContext()
 		defer cancel()
 		if verbose {
-			ctx = coach.WithVerbose(ctx)
+			ctx = utils.WithVerbose(ctx)
 		}
 
 		result, err := coach.Cleanup(ctx, maxAge, dryRun)

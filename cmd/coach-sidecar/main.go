@@ -113,7 +113,10 @@ func doFetch(source, digestHex, dataDir string) ([32]byte, error) {
 	var digestArr [32]byte
 	copy(digestArr[:], digest)
 
-	bucket, prefix := parseURI(source)
+	bucket, prefix, err := storage.ParseURI(source)
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("invalid source URI: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -217,7 +220,10 @@ func cmdUploadFile(args []string) {
 const maxUploadFileSize = 50 << 20 // 50 MiB cap to avoid OOM
 
 func doUploadFile(localFile, s3Dest string) error {
-	bucket, key := parseURI(s3Dest)
+	bucket, key, err := storage.ParseURI(s3Dest)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -278,7 +284,10 @@ func cmdDeleteFile(args []string) {
 }
 
 func doDeleteFile(s3URI string) error {
-	bucket, key := parseURI(s3URI)
+	bucket, key, err := storage.ParseURI(s3URI)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -300,7 +309,10 @@ func doDeleteFile(s3URI string) error {
 }
 
 func doUpload(localDir, s3Dest string) error {
-	bucket, prefix := parseURI(s3Dest)
+	bucket, prefix, err := storage.ParseURI(s3Dest)
+	if err != nil {
+		return fmt.Errorf("invalid s3 destination: %w", err)
+	}
 	prefix = strings.TrimSuffix(prefix, "/") + "/"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -385,12 +397,6 @@ func newS3Client(ctx context.Context) (*s3.Client, error) {
 			o.UsePathStyle = true
 		}
 	}), nil
-}
-
-func parseURI(uri string) (bucket, prefix string) {
-	rest := strings.TrimPrefix(uri, "s3://")
-	bucket, prefix, _ = strings.Cut(rest, "/")
-	return bucket, prefix
 }
 
 func fetchFilterFile(ctx context.Context, client *s3.Client, bucket, prefix, name string) map[string]bool {

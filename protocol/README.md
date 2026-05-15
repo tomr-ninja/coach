@@ -182,11 +182,9 @@ type DriverResult struct {
       "envVars": {
         "S3_PATH_IN": "bucket/data",
         "S3_PATH_OUT": "bucket/output/abc123def456",
-        "RCLONE_CONFIG_S3_TYPE": "s3",
-        "RCLONE_CONFIG_S3_PROVIDER": "AWS",
-        "RCLONE_CONFIG_S3_REGION": "us-east-1",
-        "RCLONE_CONFIG_S3_ACCESS_KEY_ID": "AKIA...",
-        "RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": "..."
+        "AWS_ACCESS_KEY_ID": "AKIA...",
+        "AWS_SECRET_ACCESS_KEY": "...",
+        "AWS_REGION": "us-east-1"
       }
     },
     "data": {
@@ -295,7 +293,7 @@ Same as above but with `"isRecurring": true` and `"schedule": {"cron": "0 */6 * 
 
 `job.isWrapped` indicates whether coach built a wrapper image around the model:
 
-- **`isWrapped: true`** — The image includes an rclone-based entrypoint that handles S3 data pull and output push.
+- **`isWrapped: true`** — The image includes a coach-sidecar-based entrypoint that handles S3 data pull and output push.
 Drivers must pass `model.envVars` to the container but must **not** attempt volume mounts or S3 transfers. Data is
 available at `/data` inside the container; output is written to `/output`.
 - **`isWrapped: false`** — The image is the raw model image. Drivers should mount data at `data.mountPath` and output

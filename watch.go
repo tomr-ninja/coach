@@ -29,9 +29,9 @@ func WatchS3Log(ctx context.Context, cfg *config.Config, logS3URI string) {
 		return
 	}
 
-	bucket, key := parseS3LogURI(logS3URI)
-	if bucket == "" || key == "" {
-		fmt.Fprintf(os.Stderr, "watch: invalid S3 log URI: %s\n", logS3URI)
+	bucket, key, err := storage.ParseURI(logS3URI)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "watch: invalid S3 log URI: %s (%v)\n", logS3URI, err)
 		return
 	}
 
@@ -195,8 +195,8 @@ func FetchAndPrintRunJSON(ctx context.Context, cfg *config.Config, runS3URI stri
 		return
 	}
 
-	bucket, key := parseS3LogURI(runS3URI)
-	if bucket == "" || key == "" {
+	bucket, key, err := storage.ParseURI(runS3URI)
+	if err != nil {
 		return
 	}
 
@@ -240,18 +240,7 @@ func FetchAndPrintRunJSON(ctx context.Context, cfg *config.Config, runS3URI stri
 	fmt.Println(string(pretty))
 }
 
-func parseS3LogURI(uri string) (bucket, key string) {
-	rest := strings.TrimPrefix(uri, "s3://")
-	bucket, key, _ = strings.Cut(rest, "/")
-	return bucket, key
-}
-
 func isNotFound(err error) bool {
-	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok {
-		return respErr.HTTPStatusCode() == http.StatusNotFound
-	}
-	s := err.Error()
-	return strings.Contains(s, "404") ||
-		strings.Contains(s, "NotFound") ||
-		strings.Contains(s, "NoSuchKey")
+	respErr, ok := errors.AsType[*smithyhttp.ResponseError](err)
+	return ok && respErr.HTTPStatusCode() == http.StatusNotFound
 }

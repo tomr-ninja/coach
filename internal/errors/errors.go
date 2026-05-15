@@ -132,7 +132,7 @@ func GetKind(err error) Kind {
 		}
 		// Continue walking the chain via Unwrap.
 		// Standard errors.Join has no Unwrap; %w chains are handled by the Error check above.
-		unwrapped := unwrap(err)
+		unwrapped := errors.Unwrap(err)
 		if unwrapped == nil {
 			break
 		}
@@ -141,28 +141,13 @@ func GetKind(err error) Kind {
 	return KindInternal
 }
 
-// unwrap is a helper that calls Unwrap() if the error supports it.
-// Avoids importing "errors" from stdlib to prevent name collision;
-// we implement our own minimal chain walker.
-type unwrapper interface {
-	Unwrap() error
-}
-
-func unwrap(err error) error {
-	u, ok := err.(unwrapper)
-	if !ok {
-		return nil
-	}
-	return u.Unwrap()
-}
-
 // GetHint extracts the first hint from an error chain. Returns "" if none found.
 func GetHint(err error) string {
 	for {
 		if e, ok := errors.AsType[*Error](err); ok && e.Suggest != "" {
 			return e.Suggest
 		}
-		u := unwrap(err)
+		u := errors.Unwrap(err)
 		if u == nil {
 			return ""
 		}
@@ -180,7 +165,7 @@ func IsTransient(err error) bool {
 		if isNetworkErrorLeaf(err) {
 			return true
 		}
-		u := unwrap(err)
+		u := errors.Unwrap(err)
 		if u == nil {
 			return false
 		}
@@ -202,7 +187,7 @@ func IsNetworkError(err error) bool {
 		if isNetworkErrorLeaf(err) {
 			return true
 		}
-		u := unwrap(err)
+		u := errors.Unwrap(err)
 		if u == nil {
 			return false
 		}

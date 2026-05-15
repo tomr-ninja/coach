@@ -20,7 +20,7 @@ coach [--verbose]
 │   ├── ls <model-image>
 │   └── run [-data] [-output] <model-image> <script> [args...]
 └── remote [-backend]
-    ├── run [-data] [-output] [-force] [-command]... [-script]
+    ├── run [-data] [-output] [-force] [-watch] [-command]... [-script]
     │       [-cpu] [-memory] [-gpu] [-gpu-type] [-label]... <model-image>
     ├── schedule [-data] [-output] [-schedule] [-command]... [-script]
     │            [-cpu] [-memory] [-gpu] [-gpu-type] [-label]... <model-image>
@@ -43,6 +43,31 @@ that folder. You can run any of those scripts with `coach script run <model-imag
 Scripts are expected to be valid entrypoints, so they must be executable from inside the container.
 
 Useful examples of scripts may be 'fetch-data', 'convert-artifact', 'evaluate', etc., but it's not specified.
+
+### Output artifacts
+
+Every S3-backed run (local or remote) writes two files into the output directory under `.coach/`:
+
+- **`log.txt`** — Complete stdout/stderr of the model run. Written line-by-line by the `log-tee` sidecar
+  command. For remote runs, periodically uploaded to S3 so `--watch` can tail it remotely.
+- **`run.json`** — Structured JSON with full run metadata: model image, digest, fingerprint, data source,
+  start/end times, exit status, upload result, error snippet, and any `metrics.json`/`meta.json` files the
+  model produced. Written initially by the entrypoint and updated at completion by the sidecar. This is
+  also the same payload sent to the finish webhook (see [Finish webhook](#finish-webhook)).
+
+For remote runs, `coach remote run` automatically fetches and pretty-prints `run.json` after the job
+completes (even without `--watch`).
+
+### Coach sidecar
+
+Coach ships a companion binary called `coach-sidecar` that is installed inside every S3 wrapper image.
+It provides four commands used by the wrapper entrypoint:
+
+- **`fetch`** — Downloads data from S3 and computes the artifact fingerprint.
+- **`upload`** — Uploads the entire output directory to S3 (skipping `.coach/log.txt`, `.coach/DONE`,
+  and `.coach/run.json`, which are uploaded separately after the run finishes).
+- **`log-tee`** — Reads stdin line-by-line, writes to both stdout and `.coach/log.txt`.
+- **`finish`** — Assembles the final `run.json`, writes it locally, and POSTs it to the webhook URL.
 
 ### Data
 
@@ -179,6 +204,10 @@ coach remote --backend prefect run \
 Data source and output must either both be local or both be S3 — mixing is not allowed.
 `-script` runs a named script from `/scripts/` in the container; `-command` passes additional command args
 (e.g. `-command python -command -u -command train.py`). The model image is a positional argument.
+- `-watch` polls the remote log file on S3 and streams it to your terminal in real time.
+  Automatically exits when the job finishes (detected via a `.coach/DONE` marker on S3).
+  Without `--watch`, the command returns immediately after submission — you can check the
+  status with `coach remote status <id>` and view logs manually.
 
 If the artifact fingerprint already exists at the output destination, the command exits with an error before
 submitting anything. Pass `--force` to override and re-run.
@@ -231,24 +260,24 @@ This means drivers never need to understand S3, fetch data, or manage uploads �
 
 1. Coach detects `s3://` in `--data`
 2. Builds a wrapper Docker image on top of your model image:
-   - Installs **rclone** inside the container
-   - Adds an **entrypoint.sh** that handles all data movement
+   - Installs the **coach-sidecar** binary inside the container (a Go binary compiled from source)
+   - Adds an **entrypoint.sh** that handles all data movement using coach-sidecar commands
    - Entrypoint script preserves the original image's ENTRYPOINT so the model runs exactly as intended
 3. Pushes the wrapper image to your registry (`registry` field in `coach.json`)
-4. Forwards the wrapper image name + env vars (S3 paths and rclone credentials) to the driver
+4. Forwards the wrapper image name + env vars (S3 paths and AWS credentials) to the driver
 5. The driver creates a container from the wrapper image and injects the env vars — that's it
 
 #### Container lifecycle
 
-When the wrapper container starts, `entrypoint.sh` runs three phases:
+When the wrapper container starts, `entrypoint.sh` runs four phases:
 
-1. **Phase 1: Pull** — `rclone copy s3:$S3_PATH_IN /data` (downloads all data)
+1. **Phase 1: Pull** — `coach-sidecar fetch` downloads data from S3 to `/data` and computes the artifact fingerprint
 2. **Phase 2: Train** — runs your model's original entrypoint + cmd (reads `/data`, writes `/output`)
-3. **Phase 3: Push** — `rclone copy /output s3:$S3_PATH_OUT` (uploads results)
-4. **Phase 4: Finish hook** — optionally POSTs a JSON summary to a webhook URL (see [Finish webhook](#finish-webhook))
+3. **Phase 3: Push** — `coach-sidecar upload` pushes results from `/output` back to S3
+4. **Phase 4: Finish hook** — `coach-sidecar finish` writes `run.json` and optionally POSTs a JSON summary to a webhook URL (see [Finish webhook](#finish-webhook))
 
-The rclone remote name is hardcoded to `s3` inside the wrapper. Credentials come from the `s3` block
-in `coach.json`, which are converted to `RCLONE_CONFIG_S3_*` env vars and injected into the container.
+Credentials are passed as standard `AWS_*` environment variables (access key, secret key, region, endpoint),
+which the coach-sidecar binary uses directly via the AWS SDK.
 
 #### Requirements
 
@@ -321,6 +350,7 @@ coach remote --backend prefect run \
   --data s3://my-bucket/training-data/ \
   --output s3://my-bucket/output/ \
   --cpu 4 --memory 16Gi \
+  --watch \
   my-model:v1
 ```
 
@@ -334,12 +364,13 @@ The driver receives:
     "image": "docker.io/myorg/coach-wrapped-my-model-v1:abc123def456",
     "envVars": {
       "S3_PATH_IN": "my-bucket/training-data/",
-      "S3_PATH_OUT": "my-bucket/output/abc123def456",
-      "RCLONE_CONFIG_S3_TYPE": "s3",
-      "RCLONE_CONFIG_S3_PROVIDER": "AWS",
-      "RCLONE_CONFIG_S3_REGION": "us-east-1",
-      "RCLONE_CONFIG_S3_ACCESS_KEY_ID": "AKIA...",
-      "RCLONE_CONFIG_S3_SECRET_ACCESS_KEY": "..."
+      "S3_PATH_OUT_PREFIX": "my-bucket/output/",
+      "COACH_MODEL_IMAGE": "my-model:v1",
+      "COACH_IMAGE_DIGEST": "abc123...",
+      "COACH_WEBHOOK_URL": "https://hooks.example.com/coach",
+      "AWS_ACCESS_KEY_ID": "AKIA...",
+      "AWS_SECRET_ACCESS_KEY": "...",
+      "AWS_REGION": "us-east-1"
     }
   }
 }
@@ -356,11 +387,16 @@ and refuses to submit if the artifact already exists — use `--force` to overri
 When `webhookUrl` is set in `coach.json`, Coach sends an HTTP POST with a JSON body after each run completes.
 The webhook fires even if the run failed — `success` and `uploadOk` indicate the outcome.
 
-**Payload:**
+**Payload (same as `run.json`):**
 
 ```json
 {
-  "fingerprint": "abc123...",
+  "modelImage": "my-model:v1",
+  "modelDigest": "abc123...",
+  "fingerprint": "def456...",
+  "dataSource": "s3://my-bucket/training-data/",
+  "startTime": "2026-05-01T10:00:00Z",
+  "endTime": "2026-05-01T10:15:00Z",
   "success": true,
   "uploadOk": true,
   "error": "optional first 256 chars of stderr on failure",
@@ -369,7 +405,12 @@ The webhook fires even if the run failed — `success` and `uploadOk` indicate t
 }
 ```
 
+- `modelImage` — original model image name
+- `modelDigest` — SHA256 digest of the model image
 - `fingerprint` — artifact fingerprint computed from model digest + data checksums
+- `dataSource` — S3 URI of the data source
+- `startTime` — UTC timestamp when the run started
+- `endTime` — UTC timestamp when the run completed
 - `success` — `true` if the model exited with code 0
 - `uploadOk` — `true` if Phase 3 (S3 result upload) succeeded
 - `error` — first 256 characters of stderr, only included on non-zero exit
@@ -416,8 +457,8 @@ driver — same behavior as before.
 
 1. Coach resolves checksums for the `--data` source (SHA256 for local files, SHA256 of S3 ETag for remote objects)
 2. Computes an artifact fingerprint: `SHA256(model digest || sorted checksums)`
-3. If the data source is an S3 URI: builds and pushes a wrapper image with rclone, derives `S3_PATH_IN`/`S3_PATH_OUT`
-   from your URIs, converts `coach.json` `s3` block to `RCLONE_CONFIG_*` env vars
+3. If the data source is an S3 URI: builds and pushes a wrapper image with coach-sidecar, derives `S3_PATH_IN`/`S3_PATH_OUT`
+   from your URIs, converts `coach.json` `s3` block to `AWS_*` env vars
 4. Builds a JSON job spec with the fingerprint, model (original or wrapped), data source, resources, env vars, and labels
 5. Invokes the driver executable, passing the job spec via stdin and backend config via `COACH_BACKEND_CONFIG`
 6. The driver translates the spec into the backend's API and returns the result as JSON on stdout

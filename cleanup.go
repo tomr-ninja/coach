@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tomr-ninja/coach/docker"
+	"github.com/tomr-ninja/coach/internal/utils"
 )
 
 const wrapperImagePrefix = "coach-wrapped-"
@@ -27,7 +28,7 @@ func Cleanup(ctx context.Context, maxAge time.Duration, dryRun bool) (*CleanupRe
 	}
 	defer client.Close()
 
-	if IsVerbose(ctx) {
+	if utils.IsVerbose(ctx) {
 		fmt.Fprintf(os.Stderr, "listing wrapper images...\n")
 	}
 	images, err := client.ImageList(ctx, wrapperImagePrefix+"*")
